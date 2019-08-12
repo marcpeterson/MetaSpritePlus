@@ -17,7 +17,7 @@ public class MetaLayerSubTarget : MetaLayerProcessor {
 
     public override int executionOrder {
         get { 
-            return 1; // After specificaiton of all @sub layers.
+            return 3; // After specificaiton of all @sub layers.
         }
     }
 

@@ -71,6 +71,7 @@ public static class ImportMenu {
                 return pluginPath_;
             }
             
+			// to get the plugin path, create and destroty a test script
             var testInstance = ScriptableObject.CreateInstance<ProjectTestInstance>();
             var script = MonoScript.FromScriptableObject(testInstance);
             var scriptPath = AssetDatabase.GetAssetPath(script);

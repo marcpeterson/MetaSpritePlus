@@ -15,10 +15,16 @@ public enum AnimControllerOutputPolicy {
     Skip, CreateOrOverride
 }
 
+public enum PixelOrigin {
+    Center, BottomLeft
+}
+
 [CreateAssetMenu(menuName = "ASE Import Settings")]
 public class ImportSettings : ScriptableObject {
 
-    public int ppu = 48;
+    public int ppu = 32;
+
+    public PixelOrigin pixelOrigin = PixelOrigin.Center;
 
     public SpriteAlignment alignment;
 
@@ -40,6 +46,8 @@ public class ImportSettings : ScriptableObject {
 
     public string animControllerOutputPath;
 
+    public string dataOutputDirectory = "";
+
     public Vector2 PivotRelativePos {
         get {
             return alignment.GetRelativePos(customPivot);
@@ -59,12 +67,33 @@ public class ImportSettingsEditor : Editor {
             GL.Label("Options");
         }
 
-        settings.baseName = EGL.TextField("Base Name", settings.baseName);
-        settings.spriteTarget = EGL.TextField("Target Child Object", settings.spriteTarget);
+        settings.baseName = EGL.TextField(new GUIContent("Base Name",
+            "Used to name the atlas, clips, and other assets generated"),
+            settings.baseName);
+
+        settings.spriteTarget = EGL.TextField(new GUIContent("Target Child Object",
+            "Optional name of child object containing destination Sprite Renderer"),
+            settings.spriteTarget);
+
+        EGL.Space();
+             
+        settings.ppu = EGL.IntField(new GUIContent("Pixel Per Unit",
+            "How many pixels span a Unity unit"),
+            settings.ppu);
+
+        settings.pixelOrigin = (PixelOrigin) EGL.EnumPopup(new GUIContent("Pixel Origin",
+            "Where on the sprite's pixel data aligns to." +
+            "\nCenter: center of the pixel (recommended)" +
+            "\nBottom Left: bottom left of the pixel (original)"),
+            settings.pixelOrigin);
+
         EGL.Space();
 
-        settings.ppu = EGL.IntField("Pixel Per Unit", settings.ppu);
-        settings.alignment = (SpriteAlignment) EGL.EnumPopup("Default Align", settings.alignment);
+        settings.alignment = (SpriteAlignment) EGL.EnumPopup(new GUIContent("Sprite Align",
+            "Where the pivot aligns to the sprite\n" +
+            "Note that a @pivot layer will override this"),
+            settings.alignment);
+
         if (settings.alignment == SpriteAlignment.Custom) {
             settings.customPivot = EGL.Vector2Field("Custom Pivot", settings.customPivot);
         }
@@ -84,6 +113,8 @@ public class ImportSettingsEditor : Editor {
         if (settings.controllerPolicy == AnimControllerOutputPolicy.CreateOrOverride) {
             settings.animControllerOutputPath = PathSelection("Anim Controller Directory", settings.animControllerOutputPath);
         }
+
+        settings.dataOutputDirectory = PathSelection("Anim Data Directory", settings.dataOutputDirectory);
 
         if (EditorGUI.EndChangeCheck()) {
             EditorUtility.SetDirty(settings);
