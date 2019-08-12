@@ -1,12 +1,19 @@
-# MetaSpritePlus
+# MetaSpritePlus (Work in Progress)
 
 This fork adds extra import capibilities to the excellent MetaSprite importer.
 
 MetaSprite is an Unity plugin that lets you import [Aseprite][aseprite]'s .ase file into Unity, as Mecanim animation clips/controllers. It also has rich **metadata support** built in, allowing one to manipulate colliders, change transforms, send messages (and much more!) easily in Aseprite.
 
-MetaSpritePlus adds a "data" importer. This lets you define Asesprite layers as a "data" layer.  Any pixels in each frame of that layer are saved to storage, which can then be accessed during gameplay.  For instance, you could define a characters footsteps and emit dust particles on specific frames of animation.
+Please note that this fork is a work-in-progress.  Although the data layer seems to be working, later changes may occur with how it is calculated and stored.
 
-I also added code comments to help clarify what's happening.  This may help other developers add their own layer processing.
+## Main differences from MetaSprite
+
+MetaSpritePlus adds a "data" importer. This lets you define Asesprite layers as a "data" layer.  Any pixels in each frame of that layer are saved to storage, which can then be accessed during gameplay.  For instance, you could define a characters footsteps and emit dust particles on specific frames of animation, precisely at the pixels defined in a data layer.
+
+## Other changes from MetaSprite
+* Added code comments to help clarify what's happening.  This may help other developers add their own layer processing.
+* Added option to change a pixel's location in world space.  Instead of bottom-left, representing it's position in the center is more useful, especially if you
+  flip sprites and use data-layer positions.
 
 # Requirements
 
@@ -18,9 +25,10 @@ You'll need the [Serialized Dictionary Lite](https://assetstore.unity.com/packag
 
 If you want to install this in a way you can contribute to the source, do the following:
 * Create a "Submodules" folder in your project's root folder.
-* Clone this project into it: `git clone https://github.com/marcpeterson/MetaSpritePlus.git`
-* Go into your `Assets` folder and make a symlink into the MetaSpritePlus "Editor" folder: 
-`mklink /d /j MetaSpritePlus ..\Submodules\MetaSpritePlus\Assets\Plugins\MetaSprite\Editor`
+* Clone this project into it:  
+  `git clone https://github.com/marcpeterson/MetaSpritePlus.git`
+* Go into your `Assets` folder and make a symlink into the MetaSpritePlus "Editor" folder:  
+  `mklink /d /j MetaSpritePlus ..\Submodules\MetaSpritePlus\Assets\Plugins\MetaSprite\Editor`
 
 Now you can edit the source as you use it in your project, yet still push changes to GitHub.
 
