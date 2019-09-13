@@ -54,6 +54,8 @@ namespace MetaSprite {
 
         enum Stage {
             LoadFile,
+            CalculateTargets,
+            CalculatePivots,
             GenerateAtlas,
             GenerateClips,
             GenerateController,
@@ -138,7 +140,19 @@ namespace MetaSprite {
                 if ( context.animControllerPath != null)
                     Directory.CreateDirectory(Path.GetDirectoryName(context.animControllerPath));
 
+                ImportStage(context, Stage.CalculateTargets);
+                CalculateTargets(context);
+
+                ImportStage(context, Stage.CalculatePivots);
+                CalculatePivots(context);
+
                 ImportStage(context, Stage.GenerateAtlas);
+
+                // test new way...
+                AtlasGenerator.GenerateSplitAtlas(context,
+                    context.file.layers.Where(it => it.type == LayerType.Content).ToList(),
+                    context.atlasPath);
+                
                 context.generatedSprites = AtlasGenerator.GenerateAtlas(context, 
                     context.file.layers.Where(it => it.type == LayerType.Content).ToList(),
                     context.atlasPath);
@@ -150,6 +164,7 @@ namespace MetaSprite {
                 GenerateAnimController(context);
 
                 ImportStage(context, Stage.InvokeMetaLayerProcessor);
+
                 context.file.layers
                     .Where(layer => layer.type == LayerType.Meta)
                     .Select(layer => {
@@ -245,6 +260,166 @@ namespace MetaSprite {
         static void ImportEnd(ImportContext ctx) {
             EditorUtility.ClearProgressBar();
         }
+
+
+        // recursive method to set child pivot indexes to be same as parent, unless the child already has a pivot index set (a split sprite)
+        static void SetChildPivots(ImportContext ctx, Layer parent)
+        {
+            ctx.file.layers.Where(child => child.parentIndex == parent.index)
+                .OrderBy(child => child.index)
+                .ToList()
+                .ForEach(child => {
+                    if ( child.pivotIndex != -1 ) {
+                        // layer is split, set children pivots to its pivot
+                        SetChildPivots(ctx, child);
+                    } else {
+                        child.pivotIndex = parent.pivotIndex;
+                        SetChildPivots(ctx, child);
+                    }
+                });
+        }
+
+
+        public static void CalculateTargets(ImportContext ctx)
+        {
+            // TODO:
+            //  - migrate this from ASEFile.cs
+        }
+
+
+        /**
+         * Calculates each frame's pivots and offsets (from parent pivot) for a layer.
+         * Called recursively.
+         */
+        static void CalcPivotAndOffsetFrames(ImportContext ctx, Layer parent)
+        {
+            // if phantom root, then calculate its pivots
+            if ( parent.layerName == "__root" ) {
+                Layer pivotLayer = ctx.file.FindLayer(parent.pivotIndex);
+                var pivots = MetaLayerPivot.CalcPivotsForAllFrames(ctx, pivotLayer);
+                parent.pivots = pivots;
+
+                // TOOD: set offsets to zero?
+                // parent.offsets = CalcPivotOffsets(parent.pivots, parent.pivots);
+            }
+            
+            // look at children.  if child has a different pivot, then calculate its pivot frames and offsets from this layer
+            ctx.file.layers.Where(child => child.parentIndex == parent.index /* && child.type == LayerType.Group */)
+                .OrderBy(child => child.index)
+                .ToList()
+                .ForEach(child => {
+                    // calculate child's pivots for all frames
+                    Layer pivotLayer = ctx.file.FindLayer(child.pivotIndex);
+                    var pivots = MetaLayerPivot.CalcPivotsForAllFrames(ctx, pivotLayer);
+                    child.pivots = pivots;
+
+                    if ( child.pivotIndex != parent.pivotIndex ) {
+                        // child has its own pivot layer, find offsets between it an parent
+                        Debug.Log($"Calculating pivot offsets between parent `{parent.layerName}` and child `{child.layerName}`");
+                        child.offsets = CalcPivotOffsets(parent.pivots, child.pivots);
+                    } else {
+                        child.offsets = parent.offsets;
+                    }
+
+                    if ( child.type == LayerType.Group ) {
+                        CalcPivotAndOffsetFrames(ctx, child);
+                    }
+                });
+
+        }
+
+
+        static List<MetaLayerPivot.OffsetFrame> CalcPivotOffsets(List<MetaLayerPivot.PivotFrame> parentPivots, List<MetaLayerPivot.PivotFrame> childPivots)
+        {
+            var offsets = new List<MetaLayerPivot.OffsetFrame>();
+            string debugBuf = " -- OFFSETS\n";
+            debugBuf       += " -- frame\tx\ty\n";
+
+            if ( childPivots != null ) {
+                if ( parentPivots != null ) {
+                    // for each frame, calculate difference between parent pivot and child pivot
+                    childPivots.ForEach(pivot => {
+//                        Debug.Log($" ---- Looking at pivot on frame {pivot.frame}");
+//                        Debug.Log($" ---- parent pivot count: {parentPivots.Count}");
+                        MetaLayerPivot.OffsetFrame offset;
+                        int parentPivotIdx = parentPivots.FindIndex(item => item.frame == pivot.frame);
+                        if ( parentPivotIdx != -1 ) {
+                            MetaLayerPivot.PivotFrame parentPivot = parentPivots[parentPivotIdx];
+//                            Debug.Log($" ---- Found parent pivot at ({parentPivot.pivot.x},{parentPivot.pivot.y})");
+                            offset = new MetaLayerPivot.OffsetFrame() { frame = pivot.frame, offset = pivot.pivot - parentPivot.pivot };
+                        } else {
+                            Debug.LogWarning($" -- parent pivot has no entry for frame {pivot.frame}");
+                            offset = new MetaLayerPivot.OffsetFrame() { frame = pivot.frame, offset = pivot.pivot };
+                        }
+//                        Debug.Log($" ---- Calculated offset ({offset.offset.x},{offset.offset.y})");
+                        offsets.Add(offset);
+                        debugBuf += $" -- {offset.frame}\t{offset.offset.x}\t{offset.offset.y}\n";
+                    });
+                } else {
+                    // no parent pivots... so just use pivot value for offset?
+                    Debug.LogWarning($" -- no parent pivot layer...");
+                    childPivots.ForEach(pivot =>
+                    {
+                        var offset = new MetaLayerPivot.OffsetFrame() { frame = pivot.frame, offset = pivot.pivot };
+                        offsets.Add(offset);
+                        debugBuf += $" -- {offset.frame}\t{offset.offset.x}\t{offset.offset.y}\n";
+                    });
+                }
+            }
+
+            Debug.Log(debugBuf);
+
+            return offsets;
+        }
+
+
+        /**
+         * Calculates the pivots and transforms for each layer/group split into its own sprite.
+         *  - Read the layers by index (orders layers bottom-to-top, with groups coming before child layers).
+         *  - For each group that has a pivot:
+         *    - Get that pivot layer
+         *    - For each frame:
+         *      - Read pixels in cel to determine its pivot
+         *      - 
+         */
+        public static void CalculatePivots(ImportContext ctx)
+        {
+            Debug.Log("=== CalculatePivots() ===");
+
+            // get each pivot metalayer, and set it as its parent group's pivotIndex
+            ctx.file.layers.Where(layer => layer.type == LayerType.Meta && layer.actionName == "pivot")
+                .ToList()
+                .ForEach(layer => {
+
+                    ctx.file.FindLayer(layer.parentIndex).pivotIndex = layer.index;
+
+                    // OPTIONAL FEATURE: we could let pivot layers have a target, in which parent isn't looked for, rather the layer matching the target
+
+                });
+
+            // recursively set each layer's pivot layer, starting from the phantom root.
+            SetChildPivots(ctx, ctx.file.FindLayer(-1));
+
+            // Find the root and calculate its pivots first.  otherwise it's found last when ordered by index.
+            Layer rootLayer = ctx.file.FindLayer(-1);
+            Layer rootPivotLayer = null;
+            if ( rootLayer.pivotIndex == -1 ) {
+
+                Debug.LogWarning("No pivot for root");
+
+                // TODO: if no root pivot, use default pivot location?
+                // TODO: if no root pivot, use default pivot location?
+                // TODO: if no root pivot, use default pivot location?
+
+            } else {
+                rootPivotLayer = ctx.file.FindLayer(rootLayer.pivotIndex);
+                Debug.Log($"root pivot: {rootPivotLayer.layerName}");
+            }
+
+            // 
+            CalcPivotAndOffsetFrames(ctx, ctx.file.FindLayer(-1));
+        }
+
 
         public static void GenerateClipImageLayer(ImportContext ctx, string childPath, List<Sprite> frameSprites) {
             foreach (var tag in ctx.file.frameTags) {

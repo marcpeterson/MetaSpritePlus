@@ -6,7 +6,13 @@ using System;
 using System.Text;
 using System.IO.Compression;
 
+using GenericToDataString;  // for object dumper
+
 using MetaSprite.Internal;
+using System.Linq;
+
+// Aseprite file specs here:
+// https://github.com/aseprite/aseprite/blob/master/docs/ase-file-specs.md
 
 namespace MetaSprite {
 
@@ -31,12 +37,18 @@ namespace MetaSprite {
         Subtract       = 17,
         Divide         = 18,
     }
-
+    
     public class ASEFile {
         public int width, height;
         public List<Frame> frames = new List<Frame>();
         public List<Layer> layers = new List<Layer>();
         public List<FrameTag> frameTags = new List<FrameTag>();
+
+        public ASEFile()
+        {
+            // add a layer to be the parent of all root layers found
+            layers.Add(new Layer { index=-1, visible=true, type=LayerType.Group,  layerName="__root", target="/" });
+        }
 
         public Layer FindLayer(int index) {
             for (int i = 0; i < layers.Count; ++i) {
@@ -55,19 +67,25 @@ namespace MetaSprite {
     }
 
     public class Layer: UserDataAcceptor {
-        public int index;
-        public int parentIndex; // =1 if level==0 (have no parent), otherwise the index of direct parent
+        public int index;                   // lower value = lower layer order = draws below higher index values
+        public int parentIndex;             // -1 if level==0 (has no parent), otherwise the index of direct parent
+        public int pivotIndex = -1;         // if layer or group has a pivot layer, this is that pivot layer's index
         public bool visible;
         public BlendMode blendMode;
         public float opacity;
-        public string layerName;
+        public string layerName;            // original name of layer/group
+        public string baseName;             // the base group or layer name without parameters (before any parameters)
         public string userData { get; set; }
+        public string target;               // path to target GameObject for layer or group
         public LayerType type;
 
         // --- META
 
-        /// If is metadata, the action name of the layer
+        /// if is metadata, the action name of the layer
         public string actionName { get; internal set; }
+
+        public List<MetaLayerPivot.PivotFrame> pivots;
+        public List<MetaLayerPivot.OffsetFrame> offsets;
 
         internal readonly List<LayerParam> parameters = new List<LayerParam>();
 
@@ -119,7 +137,9 @@ namespace MetaSprite {
     }
 
     public enum LayerType {
-        Content, Meta
+        Content = 0,
+        Group   = 1,
+        Meta    = 2
     }
 
     public enum LayerParamType {
@@ -221,7 +241,9 @@ namespace MetaSprite {
                 var levelToIndex = new Dictionary<int, int>();
                 var enabledLayerIdxs = new List<int>();
 
-                for (int i = 0; i < frameCount; ++i) {
+                string debugStr = "";
+
+                for ( int i = 0; i < frameCount; ++i) {
                     var frame = new Frame();
                     frame.frameID = i;
 
@@ -234,7 +256,7 @@ namespace MetaSprite {
 
                     reader.ReadBytes(6);
 
-                    for (int j = 0; j < chunkCount; ++j) {
+                    for ( int j = 0; j < chunkCount; ++j) {
                         var chunkBytes = reader.ReadDWord(); // 4
                         var chunkType = reader.ReadWord(); // 2
 
@@ -262,29 +284,68 @@ namespace MetaSprite {
 
                             layer.layerName = reader.ReadUTF8();
 
+//                            Debug.Log($"PARSING LAYER: {layer.layerName}");
+
                             var parentEnable = layer.parentIndex == -1 || enabledLayerIdxs.Contains(layer.parentIndex);
                             var thisEnable = layer.visible && !layer.layerName.StartsWith("//");
-                            if (parentEnable && thisEnable) {
-                                if (layerType == 0) {
+                            if ( parentEnable && thisEnable ) {
+                                if ( layerType != (ushort) LayerType.Content && layerType != (ushort) LayerType.Group ) {
+                                    Debug.Log($"Undefined layer type encountered: {layerType}");
+                                } else {
                                     layer.index = readLayerIndex;
-                                    layer.type = layer.layerName.StartsWith("@") ? LayerType.Meta : LayerType.Content;
-                                    if (layer.type == LayerType.Meta) {
-                                        MetaLayerParser.Parse(layer);
+                                    if ( layerType == (ushort) LayerType.Group ) {
+                                        layer.type = LayerType.Group;
+                                    } else {
+                                        layer.type = layer.layerName.StartsWith("@") ? LayerType.Meta : LayerType.Content;
                                     }
-
+                                    MetaLayerParser.Parse(layer);
                                     file.layers.Add(layer);
+//                                    layer.parameters.ForEach(item => Debug.Log($" - param: {item.stringValue}"));
                                 }
 
+                                // CALCULATE TARGETS
+                                // targets are used to place sprite in correct GameObject, and also used internally to determine which layers compose of each sprite
+                                string target  = "";
+                                if ( layer.type == LayerType.Meta || layer.parameters.Count == 0 ) {
+                                    // meta layers have no target/path parameter, so use parent
+                                    // if layer/group has no target parameter, then it's not split.  target is its parent target.
+                                    var parentLayer = file.FindLayer(layer.parentIndex);
+                                    if ( parentLayer != null ) {
+                                        target = parentLayer.target;
+                                    } else {
+                                        Debug.LogWarning($"parent layer index {layer.parentIndex} not found");
+                                    }
+                                } else {
+                                    string path = layer.GetParamString(0);  // target path should be the first (and only) parameter
+                                    path.TrimEnd('/');                      // clean sloppy user data
+                                    if ( path.StartsWith("/") ) {           // absolute path
+                                        target = path;
+                                    } else {                                // relative path, so combine it with its parent
+                                        var parentLayer = file.FindLayer(layer.parentIndex);
+                                        if ( parentLayer != null ) {
+                                            target = parentLayer.target + "/" + path;
+                                        } else {
+                                            Debug.LogWarning($"parent layer index {layer.parentIndex} not found");
+                                        }
+                                    }
+                                }
+
+                                layer.target = target;
                                 enabledLayerIdxs.Add(readLayerIndex);
+
+                                debugStr += Util.IndentColTab(str: $"{layer.index} - {layer.layerName}", indent: childLevel, numCharInCol: 40) + target + "\n";
                             }
 
-                            if (levelToIndex.ContainsKey(childLevel))
+                            if ( levelToIndex.ContainsKey(childLevel) ) {
                                 levelToIndex[childLevel] = readLayerIndex;
-                            else
+                            } else {
                                 levelToIndex.Add(childLevel, readLayerIndex);
+                            }
 
-                            ++readLayerIndex;
-                        
+//                            Debug.Log($" -- childLevel: {childLevel} index: {readLayerIndex} parent: {layer.parentIndex} target: {layer.target}");
+                            
+                            readLayerIndex++;
+                            
                             lastUserdataAcceptor = layer;
                             break;
                         }
@@ -396,8 +457,20 @@ namespace MetaSprite {
                     file.frames.Add(frame);
                 }
 
+                /*
+                for ( int tabs = 4; tabs<10; tabs++ ) {
+                    Debug.LogWarning($"== tabs at {tabs} ==");
+                    for ( int i = 1; i<40; i++ ) {
+                        string tmp = new string('0', i);
+                        debugStr += Util.ColTab(str: tmp, numCharInCol: 40, tabLength: tabs) + "test" + "\n";
+                    }
+                }
+                */
+
+                Debug.Log($"=== TARGETS ===\n{debugStr}");
+
                 // Post process: calculate pixel alpha
-                for (int f = 0; f < file.frames.Count; ++f) {
+                for ( int f = 0; f < file.frames.Count; ++f) {
                     var frame = file.frames[f];
                     foreach (var cel in frame.cels.Values) {
                         if (cel.type != CelType.Linked) {
@@ -506,7 +579,6 @@ namespace MetaSprite {
             if (!expression)
                 _Error(msg);
         }
-
     }
 
     public static class MetaLayerParser {
@@ -537,7 +609,7 @@ namespace MetaSprite {
                 new TokenDefinition(@"""[^""]*""", TKN_STRING),
                 new TokenDefinition(@"([-+]?\d+\.\d+([eE][-+]?\d+)?)|([-+]?\d+)", TKN_NUMBER),
                 new TokenDefinition(@"(true)|(false)", TKN_BOOL),
-                new TokenDefinition(@"[a-zA-Z0-9_\-]+", TKN_ID),
+                new TokenDefinition(@"[a-zA-Z0-9_\- ]+", TKN_ID),    // added space
                 new TokenDefinition(@"\,", TKN_COMMA),
                 new TokenDefinition(@"\(", TKN_LEFT),
                 new TokenDefinition(@"\)", TKN_RIGHT),
@@ -546,16 +618,36 @@ namespace MetaSprite {
         }
 
         public static void Parse(Layer layer) {
-            var reader = new StringReader(layer.layerName.Substring(1));
+            StringReader reader;
+            if ( layer.type == LayerType.Meta ) {
+                // remove beginning '@' from meta layer names
+                reader = new StringReader(layer.layerName.Substring(1));
+            } else {
+                reader = new StringReader(layer.layerName);
+            }
             var lexer = new Lexer(reader, defs);
             _Parse(lexer, layer);
         }
 
         static void _Parse(Lexer lexer, Layer layer) {
-            layer.actionName = _Expect(lexer, TKN_ID);
+            if ( layer.type == LayerType.Meta ) {
+                layer.actionName = _Expect(lexer, TKN_ID).ToLower();
+                if ( !_SkipSpaces(lexer) ) {
+                    return;
+                }
+            } else {
+                // token id is optional for layers/groups
+                if ( !_SkipSpaces(lexer) ) {
+                    return;
+                }
 
-            if (!_SkipSpaces(lexer)) {
-                return;
+                if ( lexer.Token == TKN_ID ) {
+                    layer.baseName = lexer.TokenContents;
+ //                   Debug.Log($"got lexer TKN_ID {layer.baseName}");
+                    if ( !_SkipSpaces(lexer) ) {
+                        return;
+                    }
+                }
             }
 
             if (lexer.Token != TKN_LEFT) {

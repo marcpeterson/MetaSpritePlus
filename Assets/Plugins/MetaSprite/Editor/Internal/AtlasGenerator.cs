@@ -23,6 +23,31 @@ namespace MetaSprite.Internal {
             public List<PackPos> positions;
         }
 
+
+        public static List<Sprite> GenerateSplitAtlas(ImportContext ctx, List<Layer> layers, string atlasPath) {
+            var file = ctx.file;
+            var settings = ctx.settings;
+            var path = atlasPath;
+
+            var targets = layers.OrderBy(layer => layer.target)
+                .ThenBy(layer => layer.index)
+                .ToList();
+
+            string debugStr = "DISTINCT TARGETS\n";
+            targets.ForEach(layer => {
+                debugStr += $"{layer.index} - {layer.layerName} - {layer.target} - {layer.pivotIndex}\n";
+
+            });
+            Debug.Log(debugStr);
+
+            // HERE
+            // we have a list of layers, grouped by their target, and ordered in their render order.
+            // we can now create sprites for each target
+
+            return new List<Sprite>();
+        }
+
+
         public static List<Sprite> GenerateAtlas(ImportContext ctx, List<Layer> layers, string atlasPath) {
             var file = ctx.file;
             var settings = ctx.settings;

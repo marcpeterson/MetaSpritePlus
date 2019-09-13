@@ -18,54 +18,72 @@ namespace MetaSprite {
             }
         }
 
-        struct PivotFrame {
+        public struct PivotFrame {
             public int frame;
             public Vector2 pivot;
         }
 
-        public override void Process(ImportContext ctx, Layer layer)
+        public struct OffsetFrame
+        {
+            public int frame;
+            public Vector2 offset;
+        }
+
+        /**
+         * Retusn a list of frames, and the pivot on each frame.  Note the pivot is in pixel coordinates
+         */
+        public static List<PivotFrame> CalcPivotsForAllFrames(ImportContext ctx, Layer pivotLayer)
         {
             var pivots = new List<PivotFrame>();
-
             var file = ctx.file;
 
-            var importer = AssetImporter.GetAtPath(ctx.atlasPath) as TextureImporter;
-            var spriteSheet = importer.spritesheet;
-
-            for (int i = 0; i < file.frames.Count; ++i) {
+            for ( int i = 0; i < file.frames.Count; ++i ) {
                 Cel cel;
-                file.frames[i].cels.TryGetValue(layer.index, out cel);
+                file.frames[i].cels.TryGetValue(pivotLayer.index, out cel);
 
-                if (cel != null) {
+                if ( cel != null ) {
                     Vector2 center = Vector2.zero;
                     int pixelCount = 0;
 
-                    for (int y = 0; y < cel.height; ++y)
-                        for (int x = 0; x < cel.width; ++x) {
+                    for ( int y = 0; y < cel.height; ++y ) {
+                        for ( int x = 0; x < cel.width; ++x ) {
                             // tex coords relative to full texture boundaries
                             int texX = cel.x + x;
                             int texY = -(cel.y + y) + file.height - 1;
 
                             var col = cel.GetPixelRaw(x, y);
-                            if (col.a > 0.1f) {
+                            if ( col.a > 0.1f ) {
                                 center += new Vector2(texX, texY);
                                 ++pixelCount;
                             }
                         }
+                    }
 
-                    if (pixelCount > 0) {
+                    if ( pixelCount > 0 ) {
                         // pivot becomes the average of all pixels found
                         center /= pixelCount;
                         pivots.Add(new PivotFrame { frame = i, pivot = center });
+                    } else {
+                        Debug.LogWarning($"Pivot layer '{pivotLayer.layerName}' is missing a pivot pixel in frame {i}");
                     }
                 }
             }
 
-            if (pivots.Count == 0)
+            return pivots;
+        }
+
+        public override void Process(ImportContext ctx, Layer layer)
+        {
+            var pivots = CalcPivotsForAllFrames(ctx, layer);
+
+            if ( pivots.Count == 0 )
                 return;
 
+            var importer = AssetImporter.GetAtPath(ctx.atlasPath) as TextureImporter;
+            var spriteSheet = importer.spritesheet;
+
             // each sprite in the sheet is a frame (no frame reuse, yet)
-            for (int i = 0; i < spriteSheet.Length; ++i) {
+            for ( int i = 0; i < spriteSheet.Length; ++i) {
                 
                 // find the pivot for this frame
                 int j = 1;
