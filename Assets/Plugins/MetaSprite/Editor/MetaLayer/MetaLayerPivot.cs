@@ -18,15 +18,23 @@ namespace MetaSprite {
             }
         }
 
-        public struct PivotFrame {
-            public int frame;
-            public Vector2 pivot;
-        }
-
-        public struct OffsetFrame
+        /**
+         * Pivots are used in atlas generation to determine (0,0) of the sprite.  It may be outside the bounds of the sprite, eg (-2,-5)
+         */
+        public class PivotFrame
         {
             public int frame;
-            public Vector2 offset;
+            public Vector2 coord;   // coordinate, in pixels, of the pivot in sprite-space
+        }
+
+        /**
+         * Offsets are the difference, in pixels between a pivot and it's parent for a given frame.  These are used in the clip animation to
+         * move the current object in relation to its parent.
+         */
+        public class OffsetFrame
+        {
+            public int frame;
+            public Vector2 coord;   // offset, in pixels, between parent and child pivots in sprite-space
         }
 
         /**
@@ -62,7 +70,7 @@ namespace MetaSprite {
                     if ( pixelCount > 0 ) {
                         // pivot becomes the average of all pixels found
                         center /= pixelCount;
-                        pivots.Add(new PivotFrame { frame = i, pivot = center });
+                        pivots.Add(new PivotFrame { frame = i, coord = center });
                     } else {
                         Debug.LogWarning($"Pivot layer '{pivotLayer.layerName}' is missing a pivot pixel in frame {i}");
                     }
@@ -90,7 +98,7 @@ namespace MetaSprite {
                 while (j < pivots.Count && pivots[j].frame <= i) ++j; // j = index after found item
 
                 // get the pivot for this frame
-                Vector2 pivot = pivots[j - 1].pivot;
+                Vector2 pivot = pivots[j - 1].coord;
 
                 // pivot is in pixel coordinates, convert to percent of bounding rectangle of width 1x1
                 // - translate the pivot's texture location to its location in the sprite/image

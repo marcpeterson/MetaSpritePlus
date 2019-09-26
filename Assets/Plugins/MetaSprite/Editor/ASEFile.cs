@@ -70,6 +70,7 @@ namespace MetaSprite {
         public int index;                   // lower value = lower layer order = draws below higher index values
         public int parentIndex;             // -1 if level==0 (has no parent), otherwise the index of direct parent
         public int pivotIndex = -1;         // if layer or group has a pivot layer, this is that pivot layer's index
+        public int childLevel;              // nested depth of layer.  currently just used for debugging indentation...
         public bool visible;
         public BlendMode blendMode;
         public float opacity;
@@ -241,8 +242,6 @@ namespace MetaSprite {
                 var levelToIndex = new Dictionary<int, int>();
                 var enabledLayerIdxs = new List<int>();
 
-                string debugStr = "";
-
                 for ( int i = 0; i < frameCount; ++i) {
                     var frame = new Frame();
                     frame.frameID = i;
@@ -268,12 +267,13 @@ namespace MetaSprite {
                             layer.visible = (flags & 0x1) != 0;
                         
                             var layerType = reader.ReadWord();
-                            var childLevel = reader.ReadWord(); // childLevel
+                            var childLevel = reader.ReadWord();
                             if (childLevel == 0) {
                                 layer.parentIndex = -1;
                             } else {
                                 layer.parentIndex = levelToIndex[childLevel - 1];
                             }
+                            layer.childLevel = childLevel;
                             
                             reader.ReadWord();
                             reader.ReadWord();
@@ -283,8 +283,6 @@ namespace MetaSprite {
                             reader.ReadBytes(3);
 
                             layer.layerName = reader.ReadUTF8();
-
-//                            Debug.Log($"PARSING LAYER: {layer.layerName}");
 
                             var parentEnable = layer.parentIndex == -1 || enabledLayerIdxs.Contains(layer.parentIndex);
                             var thisEnable = layer.visible && !layer.layerName.StartsWith("//");
@@ -300,40 +298,9 @@ namespace MetaSprite {
                                     }
                                     MetaLayerParser.Parse(layer);
                                     file.layers.Add(layer);
-//                                    layer.parameters.ForEach(item => Debug.Log($" - param: {item.stringValue}"));
                                 }
 
-                                // CALCULATE TARGETS
-                                // targets are used to place sprite in correct GameObject, and also used internally to determine which layers compose of each sprite
-                                string target  = "";
-                                if ( layer.type == LayerType.Meta || layer.parameters.Count == 0 ) {
-                                    // meta layers have no target/path parameter, so use parent
-                                    // if layer/group has no target parameter, then it's not split.  target is its parent target.
-                                    var parentLayer = file.FindLayer(layer.parentIndex);
-                                    if ( parentLayer != null ) {
-                                        target = parentLayer.target;
-                                    } else {
-                                        Debug.LogWarning($"parent layer index {layer.parentIndex} not found");
-                                    }
-                                } else {
-                                    string path = layer.GetParamString(0);  // target path should be the first (and only) parameter
-                                    path.TrimEnd('/');                      // clean sloppy user data
-                                    if ( path.StartsWith("/") ) {           // absolute path
-                                        target = path;
-                                    } else {                                // relative path, so combine it with its parent
-                                        var parentLayer = file.FindLayer(layer.parentIndex);
-                                        if ( parentLayer != null ) {
-                                            target = parentLayer.target + "/" + path;
-                                        } else {
-                                            Debug.LogWarning($"parent layer index {layer.parentIndex} not found");
-                                        }
-                                    }
-                                }
-
-                                layer.target = target;
                                 enabledLayerIdxs.Add(readLayerIndex);
-
-                                debugStr += Util.IndentColTab(str: $"{layer.index} - {layer.layerName}", indent: childLevel, numCharInCol: 40) + target + "\n";
                             }
 
                             if ( levelToIndex.ContainsKey(childLevel) ) {
@@ -342,8 +309,6 @@ namespace MetaSprite {
                                 levelToIndex.Add(childLevel, readLayerIndex);
                             }
 
-//                            Debug.Log($" -- childLevel: {childLevel} index: {readLayerIndex} parent: {layer.parentIndex} target: {layer.target}");
-                            
                             readLayerIndex++;
                             
                             lastUserdataAcceptor = layer;
@@ -456,18 +421,6 @@ namespace MetaSprite {
 
                     file.frames.Add(frame);
                 }
-
-                /*
-                for ( int tabs = 4; tabs<10; tabs++ ) {
-                    Debug.LogWarning($"== tabs at {tabs} ==");
-                    for ( int i = 1; i<40; i++ ) {
-                        string tmp = new string('0', i);
-                        debugStr += Util.ColTab(str: tmp, numCharInCol: 40, tabLength: tabs) + "test" + "\n";
-                    }
-                }
-                */
-
-                Debug.Log($"=== TARGETS ===\n{debugStr}");
 
                 // Post process: calculate pixel alpha
                 for ( int f = 0; f < file.frames.Count; ++f) {
