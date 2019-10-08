@@ -29,23 +29,19 @@ namespace MetaSprite.Internal {
             var path = atlasPath;
             var images = new List<FrameImage>();
 
-            var targetPaths = layers.OrderBy(layer => layer.target)
-                .ThenBy(layer => layer.index)
-                .Select(layer => layer.target)      // get just the target string
-                .GroupBy(target => target)
-                .Select(target => target.First())
-                .ToList();
-
             string debugStr = "GenerateSplitAtlas()\n";
-            targetPaths.ForEach(targetPath => {
+
+            foreach ( KeyValuePair<string, Target> entry in ctx.targets ) {
+                var target = entry.Value;
+                var targetPath = target.targetPath;
+                var spriteName = target.spriteName;
+
                 debugStr += $"{targetPath}\n";
 
                 var targetLayersIds = layers.Where(layer => layer.target == targetPath)
                     .Select(layer => layer.index)
                     .OrderBy(index => index)
                     .ToArray();
-
-//                debugStr += $"{layer.index} - {layer.layerName} - {layer.target} - {layer.pivotIndex}\n";
 
                 // create the image for all cels associated with this target
                 file.frames.ForEach(frame => {
@@ -54,19 +50,15 @@ namespace MetaSprite.Internal {
                         .OrderBy(it => it.layerIndex)
                         .ToList();
 
-                    var layer = file.FindLayer(targetLayersIds[0]);
-
                     var image = ExtractImage(ctx, cels);
                     if ( image.hasContent ) {
                         image.target = targetPath;
                         image.frame = frame.frameID;
-                        image.pivotIndex = layer.pivotIndex;
                         images.Add(image);
                         debugStr += $" -- frame{image.frame} had {cels.Count} cels\n";
-//                      target.images.Add(image);
                     }
                 });
-            });
+            };
 
             Debug.Log(debugStr);
 
@@ -113,7 +105,11 @@ namespace MetaSprite.Internal {
                 Vector2 newPivotNorm;
                 Vector2 cropPos = new Vector2(image.minx, file.height - image.maxy - 1);
 
-                if ( image.pivotIndex == -100 ) {
+                if ( target.targetPath == "/top/head/base" ) {
+                    Debug.Log($"pivots for 'top/head/base'");
+                }
+
+                if ( target == null ) {
 
                     /* TODO: UNTESTED */
 
@@ -131,10 +127,18 @@ namespace MetaSprite.Internal {
                     // normalize the pivot position based on the dimensions of the sprite's image.
                     newPivotNorm = Vector2.Scale(newPivotTex, new Vector2(1.0f / image.finalWidth, 1.0f / image.finalHeight));
                 } else {
-                    var pivotLayer = file.FindLayer(image.pivotIndex);
-                    Vector2 pivotTex = pivotLayer.pivots.Where(it => it.frame == image.frame)
+//                    Debug.Log($"  - target {target.targetPath} - pivot count: {target.pivots.Count}");
+
+                    // TODO: if no pivots, can we skip for this frame?
+
+
+                    Vector2 pivotTex = target.pivots.Where(it => it.frame == image.frame)
                         .Select(it => it.coord)
-                        .First();
+                        .FirstOrDefault();        // default is (0,0)
+
+                    if ( target.targetPath == "/top/head/base" ) {
+                        Debug.Log($" - pivot {image.frame} ({pivotTex.x}, {pivotTex.y})");
+                    }
 
                     pivotTex -= cropPos;
 
@@ -442,7 +446,6 @@ namespace MetaSprite.Internal {
 
             public bool hasContent = false; // used to skip empty frames
             public int frame;
-            public int pivotIndex = -100;   // TODO: kludgy default
             public string target;           // destination object to put sprite on
 
             public int minx = int.MaxValue, miny = int.MaxValue, 

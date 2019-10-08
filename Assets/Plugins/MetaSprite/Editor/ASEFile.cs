@@ -69,7 +69,6 @@ namespace MetaSprite {
     public class Layer: UserDataAcceptor {
         public int index;                   // lower value = lower layer order = draws below higher index values
         public int parentIndex;             // -1 if level==0 (has no parent), otherwise the index of direct parent
-        public int pivotIndex = -1;         // if layer or group has a pivot layer, this is that pivot layer's index
         public int childLevel;              // nested depth of layer.  currently just used for debugging indentation...
         public bool visible;
         public BlendMode blendMode;
@@ -77,7 +76,7 @@ namespace MetaSprite {
         public string layerName;            // original name of layer/group
         public string baseName;             // the base group or layer name without parameters (before any parameters)
         public string userData { get; set; }
-        public string target;               // path to target GameObject for layer or group
+        public string target;               // path to target GameObject for layer or group  TODO: rename to targetPath
         public LayerType type;
 
         // --- META

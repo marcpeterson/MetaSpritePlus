@@ -36,7 +36,7 @@ public class ImportSettings : ScriptableObject {
 
     public string baseName = ""; // If left empty, use .ase file name
 
-    public string spriteTarget = "";
+    public string spriteRootPath = "";
 
     public string atlasOutputDirectory = "";
 
@@ -58,11 +58,11 @@ public class ImportSettings : ScriptableObject {
 
 [CustomEditor(typeof(ImportSettings))]
 public class ImportSettingsEditor : Editor {
-
+    
     public override void OnInspectorGUI() {
         var settings = (ImportSettings) target;
         EditorGUI.BeginChangeCheck();
-
+        
         using (new GL.HorizontalScope(EditorStyles.toolbar)) {
             GL.Label("Options");
         }
@@ -71,14 +71,15 @@ public class ImportSettingsEditor : Editor {
             "Used to name the atlas, clips, and other assets generated"),
             settings.baseName);
 
-        settings.spriteTarget = EGL.TextField(new GUIContent("Target Child Object",
-            "Optional name of child object containing destination Sprite Renderer"),
-            settings.spriteTarget);
+        settings.spriteRootPath = EGL.TextField(new GUIContent("Sprite Root Path",
+            "Optional path from the Animator Component to the root child object that sprites will render to. " +
+            "Any split-sprite targets will use this as thier root.  Non-split sprites will simply render here."),
+            settings.spriteRootPath);
 
         EGL.Space();
-             
+        
         settings.ppu = EGL.IntField(new GUIContent("Pixel Per Unit",
-            "How many pixels span a Unity unit"),
+            "How many pixels span one Unity unit"),
             settings.ppu);
 
         settings.pixelOrigin = (PixelOrigin) EGL.EnumPopup(new GUIContent("Pixel Origin",

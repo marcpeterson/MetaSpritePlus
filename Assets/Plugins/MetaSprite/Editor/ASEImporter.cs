@@ -60,9 +60,10 @@ namespace MetaSprite {
         public string targetPath;               // path to gameobject we will render to
         public string spriteName;               // base name of sprite in atlas for this target
         public int pivotIndex = -100;           // the target's pivot layer
-        public int parentPivotIndex = -100;     // the target's parent pivot layer
         public List<MetaLayerPivot.PivotFrame> pivots = new List<MetaLayerPivot.PivotFrame>();
         public List<MetaLayerPivot.OffsetFrame> offsets = new List<MetaLayerPivot.OffsetFrame>();
+        public int numPivots = 0;
+        public int numLayers = 0;
     }
 
 
@@ -118,6 +119,25 @@ namespace MetaSprite {
             return types.Where(type => type.IsClass && interfaceType.IsAssignableFrom(type))
                         .ToArray();
         }
+
+
+        /**
+         * Given a target path, returns the parent target
+         */
+        static Target FindParentTarget(ImportContext ctx, string targetPath)
+        {
+            if ( targetPath.Length == 0 || targetPath == "/" ) {
+                return ctx.targets["/"];
+            }
+
+            var parentTargetPath = targetPath.Substring(0, targetPath.LastIndexOf('/'));
+            if ( ctx.targets.TryGetValue(parentTargetPath, out var parentTarget) ) {
+                return parentTarget;
+            } else {
+                return FindParentTarget(ctx, parentTargetPath);
+            }
+        }
+
 
         struct LayerAndProcessor {
             public Layer layer;
@@ -291,48 +311,32 @@ namespace MetaSprite {
          * If a layer or group has parameters:
          *   - if it starts with "/", then it's an absolute path, just use it
          *   - otherwise it's a relative path, append to its parent path
+         * NOTE:
+         *   The settings.spriteRootPath will be used in atlas generation.  no need to clutter target paths with it here.
          */
         public static void CalculateTargets(ImportContext ctx)
         {
             string debugStr = "";
+
+            // first, set up targets for all content layers
             ctx.file.layers
+                .Where(layer => layer.type == LayerType.Content || layer.type == LayerType.Group)
                 .OrderBy(layer => layer.index)
                 .ToList()
                 .ForEach(layer =>
                 {
-                    string target  = "";
-                    if ( layer.type == LayerType.Meta || layer.parameters.Count == 0 ) {
-                        // meta layers have no target/path parameter, so use parent
-                        // if layer/group has no target parameter, then it's not split.  target is its parent target.
-                        var parentLayer = ctx.file.FindLayer(layer.parentIndex);
-                        if ( layer.index == -1 ) {
-                            target = layer.target;
-                        } else if ( parentLayer != null ) {
-                            target = parentLayer.target;
-                        } else {
-                            Debug.LogWarning($"parent layer index {layer.parentIndex} not found");
-                        }
-                    } else {
-                        string path = layer.GetParamString(0);  // target path should be the first (and only) parameter
-                        path.TrimEnd('/');                      // clean sloppy user data
-                        if ( path.StartsWith("/") ) {           // absolute path
-                            target = path;
-                        } else {                                // relative path, so combine it with its parent
-                            var parentLayer = ctx.file.FindLayer(layer.parentIndex);
-                            if ( parentLayer != null ) {
-                                target = parentLayer.target + "/" + path;
-                            } else {
-                                Debug.LogWarning($"parent layer index {layer.parentIndex} not found");
-                            }
-                        }
-                    }
-                    layer.target = target;
+                    var target = ExtractLayerTarget(ctx, layer);
+                    debugStr += Util.IndentColTab(str: $"{layer.index} - {layer.layerName}", indent: layer.childLevel, numCharInCol: 40) + target + "\n";
+                });
 
-                    if ( ! ctx.targets.ContainsKey(target) ) {
-                        var spriteName = target.Replace('/', '.').Trim('.');
-                        ctx.targets.Add(target, new Target { targetPath = target, spriteName = spriteName });
-                    }
-
+            // now set up targets for pivot layers.  this is so we can warn users if a pivot target doesn't have any content layers.
+            ctx.file.layers
+                .Where(layer => layer.type == LayerType.Meta && layer.actionName == "pivot")
+                .OrderBy(layer => layer.index)
+                .ToList()
+                .ForEach(layer =>
+                {
+                    var target = ExtractLayerTarget(ctx, layer);
                     debugStr += Util.IndentColTab(str: $"{layer.index} - {layer.layerName}", indent: layer.childLevel, numCharInCol: 40) + target + "\n";
                 });
 
@@ -340,15 +344,62 @@ namespace MetaSprite {
         }
 
 
+        public static string ExtractLayerTarget(ImportContext ctx, Layer layer)
+        {
+            string target  = "";
+            if ( layer.parameters.Count == 0 ) {
+                // if layer/group has no target parameter, then it's not split.  target is its parent target.
+                var parentLayer = ctx.file.FindLayer(layer.parentIndex);
+                if ( layer.index == -1 ) {
+                    target = layer.target;
+                } else if ( parentLayer != null ) {
+                    target = parentLayer.target;
+                } else {
+                    Debug.LogWarning($"parent layer index {layer.parentIndex} not found");
+                }
+            } else {
+                string path = layer.GetParamString(0);  // target path should be the first (and only) parameter
+                path.TrimEnd('/');                      // clean sloppy user data
+                if ( path.StartsWith("/") ) {           // absolute path
+                    target = path;
+                } else {                                // relative path, so combine it with its parent
+                    var parentLayer = ctx.file.FindLayer(layer.parentIndex);
+                    if ( parentLayer != null ) {
+                        target = parentLayer.target.TrimEnd('/') + "/" + path;
+                    } else {
+                        Debug.LogWarning($"parent layer index {layer.parentIndex} not found");
+                    }
+                }
+            }
+            layer.target = target;
+
+            if ( !ctx.targets.ContainsKey(target) ) {
+                var spriteName = target.Replace('/', '.').Trim('.');
+                ctx.targets.Add(target, new Target { targetPath = target, spriteName = spriteName });
+            }
+
+            // keep track of how many layers and pivots each target has.  warn if more than one pivot.
+            var curTarget = ctx.targets[target];
+            if ( layer.type == LayerType.Meta && layer.actionName == "pivot" ) {
+                if ( curTarget.numPivots > 0 ) {
+                    Debug.LogWarning($"Pivot layer '{layer.layerName}' ignored because target '{target}' already has a pivot");
+                } else {
+                    curTarget.numPivots++;
+                }
+                if ( curTarget.numLayers == 0 ) {
+                    Debug.LogWarning($"Pivot layer '{layer.layerName}' with target '{target}' has no content layers");
+                }
+            } else {
+                curTarget.numLayers++;
+            }
+
+            return target;
+        }
+
+
         /**
-         * STAGE 3
-         * Calculates the pivots and transforms for each layer/group split into its own sprite.
-         *  - Read the layers by index (orders layers bottom-to-top, with groups coming before child layers).
-         *  - For each group that has a pivot:
-         *    - Get that pivot layer
-         *    - For each frame:
-         *      - Read pixels in cel to determine its pivot
-         *      - 
+         * STAGE 3A
+         * Calculates the pivots and offets for each layer/group target.
          */
         public static void CalculatePivots(ImportContext ctx)
         {
@@ -356,139 +407,100 @@ namespace MetaSprite {
             string debugStr = "=== CALCULATING PIVOTS FOR TARGETS ===\n";
 
             // get each pivot metalayer, and set it as its parent group's pivotIndex
-            ctx.file.layers.Where(layer => layer.type == LayerType.Meta && layer.actionName == "pivot")
-                .ToList()
-                .ForEach(pivotLayer => {
+            var pivotLayers = ctx.file.layers.Where(layer => layer.type == LayerType.Meta && layer.actionName == "pivot")
+                .OrderByDescending(layer => layer.index)    // this will walk down the heirachy
+                .ToList();
 
-                    // by default, a pivot layer is assigned to the group it's in (which is it's parent)
-
-
-                    ctx.file.FindLayer(pivotLayer.parentIndex).pivotIndex = pivotLayer.index;   // TOOD: deprecate
-
-
-                    var parentGroup = ctx.file.FindLayer(pivotLayer.parentIndex);
-                    if ( ! ctx.targets.ContainsKey(parentGroup.target) ) {
-                        Debug.LogWarning($" - target $`{parentGroup.target}` was not initialized");
-                        debugStr += $"Invalid pivot on layer '{pivotLayer.layerName}' - target $`{parentGroup.target}` was does not exist\n";
+            // associate pivot layer with their matching target
+            pivotLayers.ForEach(pivotLayer => {
+                if ( pivotLayer.target == "" ) {
+                    Debug.LogWarning($"Pivot layer '{pivotLayer.layerName}' didn't get a target");
+                    // if no target (set by parameter), then use its parent's target
+                    //pivotLayer.target = ctx.file.FindLayer(pivotLayer.parentIndex).target;
+                    //ctx.targets[ctx.file.FindLayer(pivotLayer.parentIndex).target].pivotIndex = pivotLayer.index;
+                } else {
+                    if ( ! ctx.targets.ContainsKey(pivotLayer.target) ) {
+                        Debug.LogWarning($"pivot target '{pivotLayer.target}' could not be found");
                     } else {
-                        var target = ctx.targets[parentGroup.target];
+                        Debug.Log($" - calculating pivots for '{pivotLayer.target}");
+                        ctx.targets[pivotLayer.target].pivotIndex = pivotLayer.index;
+                        ctx.targets[pivotLayer.target].pivots = MetaLayerPivot.CalcPivotsForAllFrames(ctx, pivotLayer);
+                    }
+                }
+            });
 
-                        if ( target.pivotIndex != -100 ) {
-                            Debug.LogWarning($" - target '{target.targetPath}' already has a pivotIndex of {target.pivotIndex}");
+            // calculate pivot positions for all frames in every pivot layer.
+            // calculate offets for all frames between parent and child pivot layers.
+            pivotLayers.ForEach(pivotLayer => {
+                var target = ctx.targets[pivotLayer.target];
+//                Debug.Log($" - calculating pivots for '{target.targetPath}");
+//                target.pivots = MetaLayerPivot.CalcPivotsForAllFrames(ctx, pivotLayer);
+
+                var targetPath = target.targetPath;
+                if ( targetPath != "/" ) {
+                    bool found = false;
+                    while ( !found && targetPath != "/" ) {
+                        var parentTarget = FindParentTarget(ctx, targetPath);
+                        if ( parentTarget.pivotIndex != target.pivotIndex ) {
+                            Debug.Log($" - calculating offsets between '{parentTarget.targetPath}' and '{pivotLayer.target}'");
+                            target.offsets = CalcPivotOffsets(parentTarget.pivots, target.pivots, (target.targetPath == "/top/head"));
+                            found = true;
                         } else {
-                            target.pivotIndex = pivotLayer.index;
-                            debugStr += $" - target '{target.targetPath}' getting pivotIndex {target.pivotIndex}\n";
-
-                            // calculate pivots for all frames, find the parent pivot and calculate offsets between the two
-                            bool found = false;
-                            Layer curGroup = parentGroup;
-                            target.pivots = MetaLayerPivot.CalcPivotsForAllFrames(ctx, pivotLayer);
-                            while ( !found ) {
-                                if ( curGroup.layerName != "__root" ) {
-                                    curGroup = ctx.file.FindLayer(curGroup.parentIndex);
-                                    if ( curGroup.pivotIndex != target.pivotIndex ) {
-                                        target.parentPivotIndex = curGroup.pivotIndex;
-                                        var parentPivots = MetaLayerPivot.CalcPivotsForAllFrames(ctx, ctx.file.FindLayer(curGroup.pivotIndex));
-                                        Debug.Log($" - calculating offsets between '{curGroup.layerName}' and '{parentGroup.layerName}'");
-                                        target.offsets = CalcPivotOffsets(parentPivots, target.pivots);
-                                        found = true;
-                                    }
-                                } else {
-                                    Debug.LogWarning($"Could not find parent pivot for '{parentGroup.layerName}'");
-                                    break;
-                                }
-                            }
+                            targetPath = parentTarget.targetPath;
                         }
                     }
 
+                    if ( !found ) {
+                        Debug.LogWarning($"Could not find parent pivot for '{pivotLayer.target}'");
+                    }
+                }
 
-                    // OPTIONAL FEATURE: we could let pivot layers have a target, in which parent isn't looked for, rather the layer matching the target
+            });
 
+            // for any target that doesn't have a pivot index, set it to its parent pivot index
+            Debug.Log("=== TARGET CLEANUP ===");
+            foreach ( KeyValuePair<string, Target> entry in ctx.targets ) {
+                var target = entry.Value;
+                if ( target.pivotIndex == -100 ) {
+                    var targetPath = target.targetPath;
+                    bool found = false;
+                    while ( !found && targetPath != "/" ) {
+                        var parentTarget = FindParentTarget(ctx, targetPath);
+                        if ( parentTarget.pivotIndex != -100 ) {
+                            target.pivotIndex = parentTarget.pivotIndex;
+                            target.pivots = parentTarget.pivots;
+                            Debug.Log($"target '{target.targetPath}' took pivot index from '{parentTarget.targetPath}': {parentTarget.pivotIndex} \n");
+                            debugStr += $"target '{target.targetPath}' took pivot index from '{parentTarget.targetPath}': {parentTarget.pivotIndex} \n";
+                            found = true;
+                            break;
+                        } else {
+                            targetPath = parentTarget.targetPath;
+                        }
+                    }
 
-                });
+                    if ( !found ) {
+                        // if no parent found with a pivotIndex, then use the root pivot index
+                        target.pivotIndex = ctx.targets["/"].pivotIndex;
+                        Debug.Log($"setting '{target.targetPath}' pivotIndex to root pivot index: {target.pivotIndex}");
+                        debugStr += $"setting '{target.targetPath}' pivotIndex to root pivot index: {target.pivotIndex}";
+                    }
+                    if ( target.pivotIndex == -100 ) {
+                        Debug.LogWarning($"  - couldn't find parent pivot for {target.targetPath}");
+                    }
+
+                }
+                debugStr += $"target {target.targetPath} pivotIndex: {target.pivotIndex}\n";
+            }
 
             Debug.Log(debugStr);
-
-            // recursively set each layer's pivot layer, starting from the phantom root.
-            SetChildPivots(ctx, ctx.file.FindLayer(-1));
-            
-            CalcPivotAndOffsetForAllFrames(ctx, ctx.file.FindLayer(-1));
         }
 
 
         /**
-         * STAGE 3A
-         * recursive method to set child pivot indexes to be same as parent, unless the child already has a pivot index set (a split sprite)
-         */
-        static void SetChildPivots(ImportContext ctx, Layer parent)
-        {
-            ctx.file.layers.Where(child => child.parentIndex == parent.index)
-                .OrderBy(child => child.index)
-                .ToList()
-                .ForEach(child => {
-                    if ( child.pivotIndex != -1 ) {
-                        // layer is split, set children pivots to its pivot
-                        SetChildPivots(ctx, child);
-                    } else {
-                        child.pivotIndex = parent.pivotIndex;
-                        SetChildPivots(ctx, child);
-                    }
-                });
-        }
-
-
-        /**
-         * STAGE 3B
-         * Calculates each frame's pivots and offsets (from parent pivot) for a layer.
-         * Called recursively.
-         */
-        static void CalcPivotAndOffsetForAllFrames(ImportContext ctx, Layer parent)
-        {
-            // if phantom root, then calculate its pivots
-            if ( parent.layerName == "__root" ) {
-                Layer pivotLayer = ctx.file.FindLayer(parent.pivotIndex);
-                var pivots = MetaLayerPivot.CalcPivotsForAllFrames(ctx, pivotLayer);
-                parent.pivots = pivots;
-
-                // TOOD: set offsets to zero?
-                // parent.offsets = CalcPivotOffsets(parent.pivots, parent.pivots);
-            }
-            
-            // look at children.  if child has a different pivot, then calculate its pivot frames and offsets from this layer
-            ctx.file.layers.Where(child => child.parentIndex == parent.index /* && child.type == LayerType.Group */)
-                .OrderBy(child => child.index)
-                .ToList()
-                .ForEach(child => {
-                    // calculate child's pivots for all frames
-                    Layer pivotLayer = ctx.file.FindLayer(child.pivotIndex);
-                    if ( pivotLayer.pivots != null ) {
-                        // if pivot layer has its pivots calculated, the just use them
-                        child.pivots = pivotLayer.pivots;
-                    } else {
-                        child.pivots = MetaLayerPivot.CalcPivotsForAllFrames(ctx, pivotLayer);
-                    }
-
-                    if ( child.pivotIndex != parent.pivotIndex ) {
-                        // child has its own pivot layer, find offsets between it an parent
-                        Debug.Log($"Calculating pivot offsets between parent `{parent.layerName}` and child `{child.layerName}`");
-                        child.offsets = CalcPivotOffsets(parent.pivots, child.pivots);
-                    } else {
-                        child.offsets = parent.offsets;
-                    }
-
-                    if ( child.type == LayerType.Group ) {
-                        CalcPivotAndOffsetForAllFrames(ctx, child);
-                    }
-                });
-
-        }
-
-
-        /**
-         * STAGE 3C
+         * STAGE 3 Helper
          * Calculate the difference, in pixels, of the parent pivot to the child pivot.  This will be used to transform the child target to the pivot's location.
          */
-        static List<MetaLayerPivot.OffsetFrame> CalcPivotOffsets(List<MetaLayerPivot.PivotFrame> parentPivots, List<MetaLayerPivot.PivotFrame> childPivots)
+        static List<MetaLayerPivot.OffsetFrame> CalcPivotOffsets(List<MetaLayerPivot.PivotFrame> parentPivots, List<MetaLayerPivot.PivotFrame> childPivots, bool debug=false)
         {
             var offsets = new List<MetaLayerPivot.OffsetFrame>();
             string debugBuf = " -- OFFSETS\n";
@@ -504,13 +516,13 @@ namespace MetaSprite {
                         int parentPivotIdx = parentPivots.FindIndex(item => item.frame == pivot.frame);
                         if ( parentPivotIdx != -1 ) {
                             MetaLayerPivot.PivotFrame parentPivot = parentPivots[parentPivotIdx];
-//                            Debug.Log($" ---- Found parent pivot at ({parentPivot.pivot.x},{parentPivot.pivot.y})");
+                            if ( debug ) Debug.Log($" ---- Found parent pivot at ({parentPivot.coord.x},{parentPivot.coord.y})");
                             offset = new MetaLayerPivot.OffsetFrame() { frame = pivot.frame, coord = pivot.coord - parentPivot.coord };
                         } else {
                             Debug.LogWarning($" -- parent pivot has no entry for frame {pivot.frame}");
                             offset = new MetaLayerPivot.OffsetFrame() { frame = pivot.frame, coord = pivot.coord };
                         }
-//                        Debug.Log($" ---- Calculated offset ({offset.offset.x},{offset.offset.y})");
+                        if ( debug ) Debug.Log($" ---- Calculated offset ({offset.coord.x},{offset.coord.y})");
                         offsets.Add(offset);
                         debugBuf += $" -- {offset.frame}\t{offset.coord.x}\t{offset.coord.y}\n";
                     });
@@ -526,7 +538,7 @@ namespace MetaSprite {
                 }
             }
 
-            Debug.Log(debugBuf);
+//            Debug.Log(debugBuf);
 
             return offsets;
         }
@@ -545,8 +557,6 @@ namespace MetaSprite {
             Directory.CreateDirectory(ctx.animClipDirectory);       
             var fileNamePrefix = ctx.animClipDirectory + '/' + ctx.settings.baseName; 
 
-            string childPath = ctx.settings.spriteTarget;
-
             // Generate one animation for each tag
             foreach (var tag in ctx.file.frameTags) {
                 var clipPath = fileNamePrefix + '_' + tag.name + ".anim";
@@ -557,6 +567,7 @@ namespace MetaSprite {
                     clip = new AnimationClip();
                     AssetDatabase.CreateAsset(clip, clipPath);
                 } else {
+                    clip.ClearCurves(); // clear existing clip curves and keyframes
                     AnimationUtility.SetAnimationEvents(clip, new AnimationEvent[0]);
                 }
 
@@ -579,123 +590,119 @@ namespace MetaSprite {
             }
 
             // Generate main image
-            GenerateClipImageLayer(ctx, childPath, ctx.generatedSprites);
+            GenerateClipImageLayer(ctx, ctx.settings.spriteRootPath, ctx.generatedSprites);
         }
 
 
         /**
          * STAGE 5B
          * For each target, set the sprite for each frame in the animation clip.
+         * spriteRootPath is passed it for legacy MetaLayerSubTarget usage.
          */
-        public static void GenerateClipImageLayer(ImportContext ctx, string childPath, List<Sprite> frameSprites)
+        public static void GenerateClipImageLayer(ImportContext ctx, string spriteRootPath, List<Sprite> frameSprites)
         {
             string debugStr = "=== CLIPS ===\n";
 
+            // get the user's path to the root sprite.  ensure it ends in a slash
+            if ( spriteRootPath != "" ) {
+                spriteRootPath.TrimEnd('/');
+            }
+
             foreach ( var tag in ctx.file.frameTags ) {
-                debugStr += $"tag:'{tag}'\n";
+                debugStr += $"tag:'{tag.name}'\n";
                 AnimationClip clip = ctx.generatedClips[tag];
 
                 foreach ( KeyValuePair<string, Target> entry in ctx.targets ) {
                     var target = entry.Value;
                     var targetPath = target.targetPath;
                     var spriteName = target.spriteName;
-                    var group = ctx.file.layers.Where(layer => layer.target == targetPath ).FirstOrDefault();
-                    if  ( group != null ) {
-                        Debug.Log($"   found group for target {targetPath}");
-                    } else {
-                        Debug.LogWarning($"   NO GROUP for target {targetPath}");
-                    }
+                    var finalTarget = (spriteRootPath + targetPath).TrimStart('/');
 
-                    debugStr += $"  - :'group:  - target: '{targetPath}' - sprite: '{spriteName}'\n";
-//                    debugStr += $"  - :'group: {group.baseName} - target: '{targetPath}' - sprite: '{spriteName}'\n";
+                    debugStr += $"target: '{targetPath}' - sprite: '{spriteName}'\n";
                     Sprite sprite = null;
                     MetaLayerPivot.OffsetFrame offset = null;
                     float time;
                     int duration = 0;   // store accumulated duration of frames.  on each loop iteration will have the start time of the cur frame, in ms
-                    var spriteKeyFrames = new ObjectReferenceKeyframe[tag.to - tag.from + 2];
-                    var tformXKeyFrames = new Keyframe[tag.to - tag.from + 2];
-                    var tformYKeyFrames = new Keyframe[tag.to - tag.from + 2];
+                    var spriteKeyFrames = new List<ObjectReferenceKeyframe>();
+                    var tformXKeyFrames = new List<Keyframe>();
+                    var tformYKeyFrames = new List<Keyframe>();
+                    
+                    //  set a variable to indicate if previous frame had a sprite.
+                    //    - if previous frame has sprite, and this frame has a sprite, then add a keyframe
+                    //    - if previous frame has sprite, and this frame doesn't, enter empty keyframe
+                    //    - if previuos frame has no sprite, and this frame has no sprite, do nothing
+                    //    - if previous frame has no sprite, and this frame has a sprite, then add a keyframe
+                    bool didPrevFrameHaveSprite = false;
+
+                    if ( target.targetPath == "/top/head" ) {
+                        Debug.Log("OFFSETS FOR /top/head");
+                    }
+
                     for ( int i = tag.from; i <= tag.to; ++i ) {
-                        sprite = frameSprites.Where(it => it.name == spriteName + "_" + i).FirstOrDefault();   // TODO: default or null???
+                        sprite = frameSprites.Where(it => it.name == spriteName + "_" + i).FirstOrDefault();
                         if ( sprite != null ) {
-                            debugStr += $"    {i} - sprite found with name '{sprite.name}'\n";
+                            debugStr += $"    {i} - sprite found with name '{sprite.name}'";
                         } else {
-                            debugStr += $"    {i} - no sprite found\n";
+                            debugStr += $"    {i} - no sprite found";
                         }
                         var aseFrame = ctx.file.frames[i];
                         time = duration * 0.001f;   // aesprite time is in ms, convert to seconds
 
-                        spriteKeyFrames[i - tag.from] = new ObjectReferenceKeyframe
-                        {
-                            time = time,   // aesprite time is in ms, convert to seconds
-                            value = sprite
-                        };
+                        if ( didPrevFrameHaveSprite || sprite != null ) {
+                            spriteKeyFrames.Add(new ObjectReferenceKeyframe { time = time, value = sprite });
+                            debugStr += $" - created sprite keyframe";
+                        }
 
                         offset = target.offsets.Where(it => it.frame == i).FirstOrDefault();
                         if ( offset != null ) {
-                            tformXKeyFrames[i - tag.from] = new Keyframe(time, offset.coord.x / ctx.settings.ppu, float.PositiveInfinity, float.PositiveInfinity); // infinity removes interpolation
-                            tformYKeyFrames[i - tag.from] = new Keyframe(time, offset.coord.y / ctx.settings.ppu, float.PositiveInfinity, float.PositiveInfinity);
+                            debugStr += $" - using offset";
+                            // infinity removes interpolation between frames, so change happens immediately when keyframe is reached
+                            tformXKeyFrames.Add(new Keyframe(time, offset.coord.x / ctx.settings.ppu, float.PositiveInfinity, float.PositiveInfinity));
+                            tformYKeyFrames.Add(new Keyframe(time, offset.coord.y / ctx.settings.ppu, float.PositiveInfinity, float.PositiveInfinity));
+                            if ( target.targetPath == "/top/head" ) {
+                                Debug.Log($" - frame {i} original: ({offset.coord.x}, {offset.coord.y}) => ({offset.coord.x / ctx.settings.ppu}, {offset.coord.y / ctx.settings.ppu})");
+                            }
                         }
+                        debugStr += $"\n";
 
                         // add this frame's duration to calculate when the next frame starts
                         duration += aseFrame.duration;
+
+                        didPrevFrameHaveSprite = (sprite != null);
                     }
 
-                    // Give the last frame an extra keyframe at the end of the animation to give that frame its duration
                     time = duration * 0.001f - 1.0f / clip.frameRate;   // clip duration in seconds, minus one frame's time
-                    spriteKeyFrames[spriteKeyFrames.Length - 1] = new ObjectReferenceKeyframe
-                    {
-                        time = time,
-                        value = sprite
-                    };
+
+                    if ( didPrevFrameHaveSprite ) {
+                        // Give the last frame an extra keyframe at the end of the animation to give that frame its duration
+                        spriteKeyFrames.Add(new ObjectReferenceKeyframe { time = time, value = sprite });
+                    }
 
                     if ( offset != null ) {
-                        tformXKeyFrames[tformXKeyFrames.Length - 1] = new Keyframe(time, offset.coord.x / ctx.settings.ppu, float.PositiveInfinity, float.PositiveInfinity);
-                        tformYKeyFrames[tformYKeyFrames.Length - 1] = new Keyframe(time, offset.coord.y / ctx.settings.ppu, float.PositiveInfinity, float.PositiveInfinity);
+                        tformXKeyFrames.Add(new Keyframe(time, offset.coord.x / ctx.settings.ppu, float.PositiveInfinity, float.PositiveInfinity));
+                        tformYKeyFrames.Add(new Keyframe(time, offset.coord.y / ctx.settings.ppu, float.PositiveInfinity, float.PositiveInfinity));
                     }
 
-                    var binding = new EditorCurveBinding
-                    {
-                        path = targetPath,
-                        type = typeof(SpriteRenderer),
-                        propertyName = "m_Sprite"
-                    };
-
-                    if ( tformXKeyFrames.Length > 0 ) {
-                        clip.SetCurve(targetPath, typeof(Transform), "localPosition.x", new AnimationCurve(tformXKeyFrames));
-                        clip.SetCurve(targetPath, typeof(Transform), "localPosition.y", new AnimationCurve(tformYKeyFrames));
+                    // only save things if the sprite had keyframes
+                    if ( spriteKeyFrames.Count() > 0 ) {
+                        var binding = new EditorCurveBinding
+                        {
+                            path = finalTarget,
+                            type = typeof(SpriteRenderer),
+                            propertyName = "m_Sprite"
+                        };
+                        AnimationUtility.SetObjectReferenceCurve(clip, binding, spriteKeyFrames.ToArray());
                     }
-                    AnimationUtility.SetObjectReferenceCurve(clip, binding, spriteKeyFrames);
+
+                    if ( tformXKeyFrames.Count > 0 ) {
+                        Debug.Log($" - final target '{finalTarget}' offset count: {tformXKeyFrames.Count}");
+                        clip.SetCurve(finalTarget, typeof(Transform), "localPosition.x", new AnimationCurve(tformXKeyFrames.ToArray()));
+                        clip.SetCurve(finalTarget, typeof(Transform), "localPosition.y", new AnimationCurve(tformYKeyFrames.ToArray()));
+                    } else {
+                        Debug.Log($" - final target '{finalTarget}' has no offsets!!");
+                    }
+
                 };
-
-                /*
-                int duration = 0;   // store accumulated duration of frames.  on each loop iteration will have the start time of the cur frame, in ms
-                var keyFrames = new ObjectReferenceKeyframe[tag.to - tag.from + 2];
-                for (int i = tag.from; i <= tag.to; ++i) {
-                    var aseFrame = ctx.file.frames[i];
-                    keyFrames[i - tag.from] = new ObjectReferenceKeyframe {
-                        time = duration * 0.001f,   // aesprite time is in ms, convert to seconds
-                        value = frameSprites[aseFrame.frameID]
-                    };
-
-                    // add this frame's duration to calculate when the next frame starts
-                    duration += aseFrame.duration;
-                }
-
-                // Give the last frame an extra keyframe at the end of the animation to give that frame its duration
-                keyFrames[keyFrames.Length - 1] = new ObjectReferenceKeyframe {
-                    time = duration * 0.001f - 1.0f / clip.frameRate,   // clip duration in seconds, minus one frame's time
-                    value = frameSprites[tag.to]
-                };
-
-                var binding = new EditorCurveBinding {
-                    path = childPath,
-                    type = typeof(SpriteRenderer),
-                    propertyName = "m_Sprite"
-                };
-
-                AnimationUtility.SetObjectReferenceCurve(clip, binding, keyFrames);
-                */
             }
 
             Debug.Log(debugStr);
