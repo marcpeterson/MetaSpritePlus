@@ -57,7 +57,7 @@ namespace MetaSprite {
      * data related to the target.
      */
     public class Target {
-        public string targetPath;               // path to gameobject we will render to
+        public string path;                     // path to gameobject we will render to
         public string spriteName;               // base name of sprite in atlas for this target
         public int pivotIndex = -100;           // the target's pivot layer
         public List<MetaLayerPivot.PivotFrame> pivots = new List<MetaLayerPivot.PivotFrame>();
@@ -346,14 +346,14 @@ namespace MetaSprite {
 
         public static string ExtractLayerTarget(ImportContext ctx, Layer layer)
         {
-            string target  = "";
+            string targetPath  = "";
             if ( layer.parameters.Count == 0 ) {
                 // if layer/group has no target parameter, then it's not split.  target is its parent target.
                 var parentLayer = ctx.file.FindLayer(layer.parentIndex);
                 if ( layer.index == -1 ) {
-                    target = layer.target;
+                    targetPath = layer.targetPath;
                 } else if ( parentLayer != null ) {
-                    target = parentLayer.target;
+                    targetPath = parentLayer.targetPath;
                 } else {
                     Debug.LogWarning($"parent layer index {layer.parentIndex} not found");
                 }
@@ -361,39 +361,39 @@ namespace MetaSprite {
                 string path = layer.GetParamString(0);  // target path should be the first (and only) parameter
                 path.TrimEnd('/');                      // clean sloppy user data
                 if ( path.StartsWith("/") ) {           // absolute path
-                    target = path;
+                    targetPath = path;
                 } else {                                // relative path, so combine it with its parent
                     var parentLayer = ctx.file.FindLayer(layer.parentIndex);
                     if ( parentLayer != null ) {
-                        target = parentLayer.target.TrimEnd('/') + "/" + path;
+                        targetPath = parentLayer.targetPath.TrimEnd('/') + "/" + path;
                     } else {
                         Debug.LogWarning($"parent layer index {layer.parentIndex} not found");
                     }
                 }
             }
-            layer.target = target;
+            layer.targetPath = targetPath;
 
-            if ( !ctx.targets.ContainsKey(target) ) {
-                var spriteName = target.Replace('/', '.').Trim('.');
-                ctx.targets.Add(target, new Target { targetPath = target, spriteName = spriteName });
+            if ( !ctx.targets.ContainsKey(targetPath) ) {
+                var spriteName = targetPath.Replace('/', '.').Trim('.');
+                ctx.targets.Add(targetPath, new Target { path = targetPath, spriteName = spriteName });
             }
 
             // keep track of how many layers and pivots each target has.  warn if more than one pivot.
-            var curTarget = ctx.targets[target];
+            var curTarget = ctx.targets[targetPath];
             if ( layer.type == LayerType.Meta && layer.actionName == "pivot" ) {
                 if ( curTarget.numPivots > 0 ) {
-                    Debug.LogWarning($"Pivot layer '{layer.layerName}' ignored because target '{target}' already has a pivot");
+                    Debug.LogWarning($"Pivot layer '{layer.layerName}' ignored because target '{targetPath}' already has a pivot");
                 } else {
                     curTarget.numPivots++;
                 }
                 if ( curTarget.numLayers == 0 ) {
-                    Debug.LogWarning($"Pivot layer '{layer.layerName}' with target '{target}' has no content layers");
+                    Debug.LogWarning($"Pivot layer '{layer.layerName}' with target '{targetPath}' has no content layers");
                 }
             } else {
                 curTarget.numLayers++;
             }
 
-            return target;
+            return targetPath;
         }
 
 
@@ -403,7 +403,6 @@ namespace MetaSprite {
          */
         public static void CalculatePivots(ImportContext ctx)
         {
-            Debug.Log("CalculatePivots()");
             string debugStr = "=== CALCULATING PIVOTS FOR TARGETS ===\n";
 
             // get each pivot metalayer, and set it as its parent group's pivotIndex
@@ -413,18 +412,16 @@ namespace MetaSprite {
 
             // associate pivot layer with their matching target
             pivotLayers.ForEach(pivotLayer => {
-                if ( pivotLayer.target == "" ) {
-                    Debug.LogWarning($"Pivot layer '{pivotLayer.layerName}' didn't get a target");
+                if ( pivotLayer.targetPath == "" ) {
                     // if no target (set by parameter), then use its parent's target
                     //pivotLayer.target = ctx.file.FindLayer(pivotLayer.parentIndex).target;
                     //ctx.targets[ctx.file.FindLayer(pivotLayer.parentIndex).target].pivotIndex = pivotLayer.index;
                 } else {
-                    if ( ! ctx.targets.ContainsKey(pivotLayer.target) ) {
-                        Debug.LogWarning($"pivot target '{pivotLayer.target}' could not be found");
+                    if ( ! ctx.targets.ContainsKey(pivotLayer.targetPath) ) {
+                        Debug.LogWarning($"pivot target '{pivotLayer.targetPath}' could not be found");
                     } else {
-                        Debug.Log($" - calculating pivots for '{pivotLayer.target}");
-                        ctx.targets[pivotLayer.target].pivotIndex = pivotLayer.index;
-                        ctx.targets[pivotLayer.target].pivots = MetaLayerPivot.CalcPivotsForAllFrames(ctx, pivotLayer);
+                        ctx.targets[pivotLayer.targetPath].pivotIndex = pivotLayer.index;
+                        ctx.targets[pivotLayer.targetPath].pivots = MetaLayerPivot.CalcPivotsForAllFrames(ctx, pivotLayer);
                     }
                 }
             });
@@ -432,64 +429,58 @@ namespace MetaSprite {
             // calculate pivot positions for all frames in every pivot layer.
             // calculate offets for all frames between parent and child pivot layers.
             pivotLayers.ForEach(pivotLayer => {
-                var target = ctx.targets[pivotLayer.target];
-//                Debug.Log($" - calculating pivots for '{target.targetPath}");
-//                target.pivots = MetaLayerPivot.CalcPivotsForAllFrames(ctx, pivotLayer);
+                var target = ctx.targets[pivotLayer.targetPath];
 
-                var targetPath = target.targetPath;
+                var targetPath = target.path;
                 if ( targetPath != "/" ) {
                     bool found = false;
                     while ( !found && targetPath != "/" ) {
                         var parentTarget = FindParentTarget(ctx, targetPath);
                         if ( parentTarget.pivotIndex != target.pivotIndex ) {
-                            Debug.Log($" - calculating offsets between '{parentTarget.targetPath}' and '{pivotLayer.target}'");
-                            target.offsets = CalcPivotOffsets(parentTarget.pivots, target.pivots, (target.targetPath == "/top/head"));
+                            target.offsets = CalcPivotOffsets(parentTarget.pivots, target.pivots);
                             found = true;
                         } else {
-                            targetPath = parentTarget.targetPath;
+                            targetPath = parentTarget.path;
                         }
                     }
 
                     if ( !found ) {
-                        Debug.LogWarning($"Could not find parent pivot for '{pivotLayer.target}'");
+                        Debug.LogWarning($"Could not find parent pivot for '{pivotLayer.targetPath}'");
                     }
                 }
 
             });
 
             // for any target that doesn't have a pivot index, set it to its parent pivot index
-            Debug.Log("=== TARGET CLEANUP ===");
             foreach ( KeyValuePair<string, Target> entry in ctx.targets ) {
                 var target = entry.Value;
                 if ( target.pivotIndex == -100 ) {
-                    var targetPath = target.targetPath;
+                    var targetPath = target.path;
                     bool found = false;
                     while ( !found && targetPath != "/" ) {
                         var parentTarget = FindParentTarget(ctx, targetPath);
                         if ( parentTarget.pivotIndex != -100 ) {
                             target.pivotIndex = parentTarget.pivotIndex;
                             target.pivots = parentTarget.pivots;
-                            Debug.Log($"target '{target.targetPath}' took pivot index from '{parentTarget.targetPath}': {parentTarget.pivotIndex} \n");
-                            debugStr += $"target '{target.targetPath}' took pivot index from '{parentTarget.targetPath}': {parentTarget.pivotIndex} \n";
+                            debugStr += $"target '{target.path}' took pivot index from '{parentTarget.path}': {parentTarget.pivotIndex} \n";
                             found = true;
                             break;
                         } else {
-                            targetPath = parentTarget.targetPath;
+                            targetPath = parentTarget.path;
                         }
                     }
 
                     if ( !found ) {
                         // if no parent found with a pivotIndex, then use the root pivot index
                         target.pivotIndex = ctx.targets["/"].pivotIndex;
-                        Debug.Log($"setting '{target.targetPath}' pivotIndex to root pivot index: {target.pivotIndex}");
-                        debugStr += $"setting '{target.targetPath}' pivotIndex to root pivot index: {target.pivotIndex}";
+                        debugStr += $"setting '{target.path}' pivotIndex to root pivot index: {target.pivotIndex}";
                     }
                     if ( target.pivotIndex == -100 ) {
-                        Debug.LogWarning($"  - couldn't find parent pivot for {target.targetPath}");
+                        Debug.LogWarning($"  - couldn't find parent pivot for {target.path}");
                     }
 
                 }
-                debugStr += $"target {target.targetPath} pivotIndex: {target.pivotIndex}\n";
+                debugStr += $"target {target.path} pivotIndex: {target.pivotIndex}\n";
             }
 
             Debug.Log(debugStr);
@@ -500,31 +491,24 @@ namespace MetaSprite {
          * STAGE 3 Helper
          * Calculate the difference, in pixels, of the parent pivot to the child pivot.  This will be used to transform the child target to the pivot's location.
          */
-        static List<MetaLayerPivot.OffsetFrame> CalcPivotOffsets(List<MetaLayerPivot.PivotFrame> parentPivots, List<MetaLayerPivot.PivotFrame> childPivots, bool debug=false)
+        static List<MetaLayerPivot.OffsetFrame> CalcPivotOffsets(List<MetaLayerPivot.PivotFrame> parentPivots, List<MetaLayerPivot.PivotFrame> childPivots)
         {
             var offsets = new List<MetaLayerPivot.OffsetFrame>();
-            string debugBuf = " -- OFFSETS\n";
-            debugBuf       += " -- frame\tx\ty\n";
 
             if ( childPivots != null ) {
                 if ( parentPivots != null ) {
                     // for each frame, calculate difference between parent pivot and child pivot
                     childPivots.ForEach(pivot => {
-//                        Debug.Log($" ---- Looking at pivot on frame {pivot.frame}");
-//                        Debug.Log($" ---- parent pivot count: {parentPivots.Count}");
                         MetaLayerPivot.OffsetFrame offset;
                         int parentPivotIdx = parentPivots.FindIndex(item => item.frame == pivot.frame);
                         if ( parentPivotIdx != -1 ) {
                             MetaLayerPivot.PivotFrame parentPivot = parentPivots[parentPivotIdx];
-                            if ( debug ) Debug.Log($" ---- Found parent pivot at ({parentPivot.coord.x},{parentPivot.coord.y})");
                             offset = new MetaLayerPivot.OffsetFrame() { frame = pivot.frame, coord = pivot.coord - parentPivot.coord };
                         } else {
                             Debug.LogWarning($" -- parent pivot has no entry for frame {pivot.frame}");
                             offset = new MetaLayerPivot.OffsetFrame() { frame = pivot.frame, coord = pivot.coord };
                         }
-                        if ( debug ) Debug.Log($" ---- Calculated offset ({offset.coord.x},{offset.coord.y})");
                         offsets.Add(offset);
-                        debugBuf += $" -- {offset.frame}\t{offset.coord.x}\t{offset.coord.y}\n";
                     });
                 } else {
                     // no parent pivots... so just use pivot value for offset?
@@ -533,12 +517,9 @@ namespace MetaSprite {
                     {
                         var offset = new MetaLayerPivot.OffsetFrame() { frame = pivot.frame, coord = pivot.coord };
                         offsets.Add(offset);
-                        debugBuf += $" -- {offset.frame}\t{offset.coord.x}\t{offset.coord.y}\n";
                     });
                 }
             }
-
-//            Debug.Log(debugBuf);
 
             return offsets;
         }
@@ -614,7 +595,7 @@ namespace MetaSprite {
 
                 foreach ( KeyValuePair<string, Target> entry in ctx.targets ) {
                     var target = entry.Value;
-                    var targetPath = target.targetPath;
+                    var targetPath = target.path;
                     var spriteName = target.spriteName;
                     var finalTarget = (spriteRootPath + targetPath).TrimStart('/');
 
@@ -634,7 +615,7 @@ namespace MetaSprite {
                     //    - if previous frame has no sprite, and this frame has a sprite, then add a keyframe
                     bool didPrevFrameHaveSprite = false;
 
-                    if ( target.targetPath == "/top/head" ) {
+                    if ( target.path == "/top/head" ) {
                         Debug.Log("OFFSETS FOR /top/head");
                     }
 
@@ -659,7 +640,7 @@ namespace MetaSprite {
                             // infinity removes interpolation between frames, so change happens immediately when keyframe is reached
                             tformXKeyFrames.Add(new Keyframe(time, offset.coord.x / ctx.settings.ppu, float.PositiveInfinity, float.PositiveInfinity));
                             tformYKeyFrames.Add(new Keyframe(time, offset.coord.y / ctx.settings.ppu, float.PositiveInfinity, float.PositiveInfinity));
-                            if ( target.targetPath == "/top/head" ) {
+                            if ( target.path == "/top/head" ) {
                                 Debug.Log($" - frame {i} original: ({offset.coord.x}, {offset.coord.y}) => ({offset.coord.x / ctx.settings.ppu}, {offset.coord.y / ctx.settings.ppu})");
                             }
                         }

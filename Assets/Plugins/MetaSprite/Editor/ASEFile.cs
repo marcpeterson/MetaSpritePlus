@@ -47,7 +47,7 @@ namespace MetaSprite {
         public ASEFile()
         {
             // add a layer to be the parent of all root layers found
-            layers.Add(new Layer { index=-1, visible=true, type=LayerType.Group,  layerName="__root", target="/" });
+            layers.Add(new Layer { index=-1, visible=true, type=LayerType.Group,  layerName="__root", targetPath="/" });
         }
 
         public Layer FindLayer(int index) {
@@ -76,16 +76,13 @@ namespace MetaSprite {
         public string layerName;            // original name of layer/group
         public string baseName;             // the base group or layer name without parameters (before any parameters)
         public string userData { get; set; }
-        public string target;               // path to target GameObject for layer or group  TODO: rename to targetPath
+        public string targetPath;           // path to target GameObject for layer or group  TODO: rename to targetPath
         public LayerType type;
 
         // --- META
 
         /// if is metadata, the action name of the layer
         public string actionName { get; internal set; }
-
-        public List<MetaLayerPivot.PivotFrame> pivots;
-        public List<MetaLayerPivot.OffsetFrame> offsets;
 
         internal readonly List<LayerParam> parameters = new List<LayerParam>();
 
@@ -595,7 +592,6 @@ namespace MetaSprite {
 
                 if ( lexer.Token == TKN_ID ) {
                     layer.baseName = lexer.TokenContents;
- //                   Debug.Log($"got lexer TKN_ID {layer.baseName}");
                     if ( !_SkipSpaces(lexer) ) {
                         return;
                     }

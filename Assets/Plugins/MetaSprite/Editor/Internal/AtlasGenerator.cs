@@ -29,16 +29,12 @@ namespace MetaSprite.Internal {
             var path = atlasPath;
             var images = new List<FrameImage>();
 
-            string debugStr = "GenerateSplitAtlas()\n";
-
             foreach ( KeyValuePair<string, Target> entry in ctx.targets ) {
                 var target = entry.Value;
-                var targetPath = target.targetPath;
+                var targetPath = target.path;
                 var spriteName = target.spriteName;
 
-                debugStr += $"{targetPath}\n";
-
-                var targetLayersIds = layers.Where(layer => layer.target == targetPath)
+                var targetLayersIds = layers.Where(layer => layer.targetPath == targetPath)
                     .Select(layer => layer.index)
                     .OrderBy(index => index)
                     .ToArray();
@@ -55,12 +51,9 @@ namespace MetaSprite.Internal {
                         image.target = targetPath;
                         image.frame = frame.frameID;
                         images.Add(image);
-                        debugStr += $" -- frame{image.frame} had {cels.Count} cels\n";
                     }
                 });
             };
-
-            Debug.Log(debugStr);
 
             var packList = images.Select(image => new PackData { width = image.finalWidth, height = image.finalHeight }).ToList();
             var packResult = PackAtlas(packList, settings.border);
@@ -97,17 +90,12 @@ namespace MetaSprite.Internal {
                 }
 
                 var metadata = new SpriteMetaData();
-//                metadata.name = ctx.fileNameNoExt + "_" + i;
                 metadata.name = target.spriteName + "_" + image.frame;
                 metadata.alignment = (int) SpriteAlignment.Custom;
                 metadata.rect = new Rect(pos.x, pos.y, image.finalWidth, image.finalHeight);
 
                 Vector2 newPivotNorm;
                 Vector2 cropPos = new Vector2(image.minx, file.height - image.maxy - 1);
-
-                if ( target.targetPath == "/top/head/base" ) {
-                    Debug.Log($"pivots for 'top/head/base'");
-                }
 
                 if ( target == null ) {
 
@@ -135,10 +123,6 @@ namespace MetaSprite.Internal {
                     Vector2 pivotTex = target.pivots.Where(it => it.frame == image.frame)
                         .Select(it => it.coord)
                         .FirstOrDefault();        // default is (0,0)
-
-                    if ( target.targetPath == "/top/head/base" ) {
-                        Debug.Log($" - pivot {image.frame} ({pivotTex.x}, {pivotTex.y})");
-                    }
 
                     pivotTex -= cropPos;
 
