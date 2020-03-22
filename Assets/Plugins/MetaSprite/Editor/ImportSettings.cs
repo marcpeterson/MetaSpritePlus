@@ -9,7 +9,7 @@ using UnityEditor.Animations;
 using GL = UnityEngine.GUILayout;
 using EGL = UnityEditor.EditorGUILayout;
 
-namespace MetaSprite {
+namespace MetaSpritePlus {
 
     public enum AnimControllerOutputPolicy {
         Skip, CreateOrOverride

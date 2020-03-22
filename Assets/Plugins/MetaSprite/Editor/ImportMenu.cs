@@ -9,10 +9,10 @@ using System.IO;
 using GL = UnityEngine.GUILayout;
 using EGL = UnityEditor.EditorGUILayout;
 
-using MetaSprite.Internal;
+using MetaSpritePlus.Internal;
 using System;
 
-namespace MetaSprite {
+namespace MetaSpritePlus {
 
     public static class ImportMenu {
 

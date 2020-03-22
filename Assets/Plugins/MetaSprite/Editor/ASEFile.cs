@@ -8,13 +8,13 @@ using System.IO.Compression;
 
 using GenericToDataString;  // for object dumper
 
-using MetaSprite.Internal;
+using MetaSpritePlus.Internal;
 using System.Linq;
 
 // Aseprite file specs here:
 // https://github.com/aseprite/aseprite/blob/master/docs/ase-file-specs.md
 
-namespace MetaSprite {
+namespace MetaSpritePlus {
 
     public enum BlendMode {
         Normal         = 0,

@@ -1,11 +1,9 @@
-
-
 using System.Collections.Generic;
 using System.Linq;
 using UnityEditor;
 using UnityEngine;
 
-namespace MetaSprite {
+namespace MetaSpritePlus {
 
     public class MetaLayerPivot : MetaLayerProcessor {
         public override string actionName {

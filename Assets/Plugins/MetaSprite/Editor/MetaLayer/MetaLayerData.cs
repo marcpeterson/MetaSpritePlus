@@ -5,7 +5,7 @@ using System.Linq;
 using UnityEditor;
 using UnityEngine;
 
-namespace MetaSprite {
+namespace MetaSpritePlus {
 
     public class MetaLayerData : MetaLayerProcessor {
         public override string actionName {

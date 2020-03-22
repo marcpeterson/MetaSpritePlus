@@ -5,7 +5,7 @@ using UnityEngine;
 using UnityEditor;
 using TangentMode = UnityEditor.AnimationUtility.TangentMode;
 
-namespace MetaSprite {
+namespace MetaSpritePlus {
     
     public class MetaLayerBoxCollider : MetaLayerProcessor {
         public override string actionName {

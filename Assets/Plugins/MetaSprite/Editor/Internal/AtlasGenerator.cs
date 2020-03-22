@@ -6,7 +6,7 @@ using System.Linq;
 using UnityEditor;
 using UnityEngine;
 
-namespace MetaSprite.Internal {
+namespace MetaSpritePlus.Internal {
 
     public static class AtlasGenerator {
 

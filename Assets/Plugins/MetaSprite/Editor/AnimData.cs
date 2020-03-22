@@ -31,7 +31,7 @@ using GenericToDataString;  // for object dumper
  *   
  */
 
-namespace MetaSprite
+namespace MetaSpritePlus
 {
 
     [System.Serializable]

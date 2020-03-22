@@ -8,10 +8,10 @@ using UnityEngine;
 
 using GenericToDataString;  // for object dumper
 
-using MetaSprite.Internal;
+using MetaSpritePlus.Internal;
 using System.Linq;
 
-namespace MetaSprite {
+namespace MetaSpritePlus {
 
     public class ImportContext {
 

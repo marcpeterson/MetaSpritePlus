@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using UnityEngine;
 
-namespace MetaSprite {
+namespace MetaSpritePlus {
 
     public class ProjectTestInstance : ScriptableObject {
     }

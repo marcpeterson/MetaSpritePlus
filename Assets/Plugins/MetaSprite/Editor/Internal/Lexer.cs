@@ -3,7 +3,7 @@ using System;
 using System.IO;
 using System.Text.RegularExpressions;
 
-namespace MetaSprite.Internal {
+namespace MetaSpritePlus.Internal {
 
     public interface IMatcher
     {
