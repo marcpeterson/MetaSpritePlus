@@ -4,10 +4,10 @@ using UnityEngine;
 
 namespace MetaSprite {
 
-public class ImportSettingsReference : ScriptableObject {
+    public class ImportSettingsReference : ScriptableObject {
 
-    public ImportSettings settings;
+        public ImportSettings settings;
     
-}
+    }
 
 }

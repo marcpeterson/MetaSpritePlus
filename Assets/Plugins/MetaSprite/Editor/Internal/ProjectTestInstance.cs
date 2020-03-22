@@ -4,7 +4,7 @@ using UnityEngine;
 
 namespace MetaSprite {
 
-public class ProjectTestInstance : ScriptableObject {
-}
+    public class ProjectTestInstance : ScriptableObject {
+    }
 
 }

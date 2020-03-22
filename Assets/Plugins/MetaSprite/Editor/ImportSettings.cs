@@ -11,155 +11,155 @@ using EGL = UnityEditor.EditorGUILayout;
 
 namespace MetaSprite {
 
-public enum AnimControllerOutputPolicy {
-    Skip, CreateOrOverride
-}
-
-public enum PixelOrigin {
-    Center, BottomLeft
-}
-
-[CreateAssetMenu(menuName = "ASE Import Settings")]
-public class ImportSettings : ScriptableObject {
-
-    public int ppu = 32;
-
-    public PixelOrigin pixelOrigin = PixelOrigin.Center;
-
-    public SpriteAlignment alignment;
-
-    public Vector2 customPivot;
-
-    public bool densePacked = true;
-
-    public int border = 3;
-
-    public string baseName = ""; // If left empty, use .ase file name
-
-    public string spriteRootPath = "";
-
-    public string atlasOutputDirectory = "";
-
-    public string clipOutputDirectory = "";
-
-    public AnimControllerOutputPolicy controllerPolicy;
-
-    public string animControllerOutputPath;
-
-    public string dataOutputDirectory = "";
-
-    public Vector2 PivotRelativePos {
-        get {
-            return alignment.GetRelativePos(customPivot);
-        }
+    public enum AnimControllerOutputPolicy {
+        Skip, CreateOrOverride
     }
 
-}
+    public enum PixelOrigin {
+        Center, BottomLeft
+    }
 
-[CustomEditor(typeof(ImportSettings))]
-public class ImportSettingsEditor : Editor {
+    [CreateAssetMenu(menuName = "ASE Import Settings")]
+    public class ImportSettings : ScriptableObject {
+
+        public int ppu = 32;
+
+        public PixelOrigin pixelOrigin = PixelOrigin.Center;
+
+        public SpriteAlignment alignment;
+
+        public Vector2 customPivot;
+
+        public bool densePacked = true;
+
+        public int border = 3;
+
+        public string baseName = ""; // If left empty, use .ase file name
+
+        public string spriteRootPath = "";
+
+        public string atlasOutputDirectory = "";
+
+        public string clipOutputDirectory = "";
+
+        public AnimControllerOutputPolicy controllerPolicy;
+
+        public string animControllerOutputPath;
+
+        public string dataOutputDirectory = "";
+
+        public Vector2 PivotRelativePos {
+            get {
+                return alignment.GetRelativePos(customPivot);
+            }
+        }
+
+    }
+
+    [CustomEditor(typeof(ImportSettings))]
+    public class ImportSettingsEditor : Editor {
     
-    public override void OnInspectorGUI() {
-        var settings = (ImportSettings) target;
-        EditorGUI.BeginChangeCheck();
+        public override void OnInspectorGUI() {
+            var settings = (ImportSettings) target;
+            EditorGUI.BeginChangeCheck();
         
-        using (new GL.HorizontalScope(EditorStyles.toolbar)) {
-            GL.Label("Options");
-        }
+            using (new GL.HorizontalScope(EditorStyles.toolbar)) {
+                GL.Label("Options");
+            }
 
-        settings.baseName = EGL.TextField(new GUIContent("Base Name",
-            "Used to name the atlas, clips, and other assets generated"),
-            settings.baseName);
+            settings.baseName = EGL.TextField(new GUIContent("Base Name",
+                "Used to name the atlas, clips, and other assets generated"),
+                settings.baseName);
 
-        settings.spriteRootPath = EGL.TextField(new GUIContent("Sprite Root Path",
-            "Optional path from the Animator Component to the root child object that sprites will render to. " +
-            "Any split-sprite targets will use this as thier root.  Non-split sprites will simply render here."),
-            settings.spriteRootPath);
+            settings.spriteRootPath = EGL.TextField(new GUIContent("Sprite Root Path",
+                "Optional path from the Animator Component to the root child object that sprites will render to. " +
+                "Any split-sprite targets will use this as thier root.  Non-split sprites will simply render here."),
+                settings.spriteRootPath);
 
-        EGL.Space();
+            EGL.Space();
         
-        settings.ppu = EGL.IntField(new GUIContent("Pixel Per Unit",
-            "How many pixels span one Unity unit"),
-            settings.ppu);
+            settings.ppu = EGL.IntField(new GUIContent("Pixel Per Unit",
+                "How many pixels span one Unity unit"),
+                settings.ppu);
 
-        settings.pixelOrigin = (PixelOrigin) EGL.EnumPopup(new GUIContent("Pixel Origin",
-            "Where on the sprite's pixel data aligns to." +
-            "\nCenter: center of the pixel (recommended)" +
-            "\nBottom Left: bottom left of the pixel (original)"),
-            settings.pixelOrigin);
+            settings.pixelOrigin = (PixelOrigin) EGL.EnumPopup(new GUIContent("Pixel Origin",
+                "Where on the sprite's pixel data aligns to." +
+                "\nCenter: center of the pixel (recommended)" +
+                "\nBottom Left: bottom left of the pixel (original)"),
+                settings.pixelOrigin);
 
-        EGL.Space();
+            EGL.Space();
 
-        settings.alignment = (SpriteAlignment) EGL.EnumPopup(new GUIContent("Sprite Align",
-            "Where the pivot aligns to the sprite\n" +
-            "Note that a @pivot layer will override this"),
-            settings.alignment);
+            settings.alignment = (SpriteAlignment) EGL.EnumPopup(new GUIContent("Sprite Align",
+                "Where the pivot aligns to the sprite\n" +
+                "Note that a @pivot layer will override this"),
+                settings.alignment);
 
-        if (settings.alignment == SpriteAlignment.Custom) {
-            settings.customPivot = EGL.Vector2Field("Custom Pivot", settings.customPivot);
-        }
+            if (settings.alignment == SpriteAlignment.Custom) {
+                settings.customPivot = EGL.Vector2Field("Custom Pivot", settings.customPivot);
+            }
 
-        settings.densePacked = EGL.Toggle("Dense Pack", settings.densePacked);
-        settings.border = EGL.IntField("Border", settings.border);
+            settings.densePacked = EGL.Toggle("Dense Pack", settings.densePacked);
+            settings.border = EGL.IntField("Border", settings.border);
 
-        EGL.Space();
-        using (new GL.HorizontalScope(EditorStyles.toolbar)) {
-            GL.Label("Output");
-        }
+            EGL.Space();
+            using (new GL.HorizontalScope(EditorStyles.toolbar)) {
+                GL.Label("Output");
+            }
         
-        settings.atlasOutputDirectory = PathSelection("Atlas Directory", settings.atlasOutputDirectory);
-        settings.clipOutputDirectory = PathSelection("Anim Clip Directory", settings.clipOutputDirectory);
+            settings.atlasOutputDirectory = PathSelection("Atlas Directory", settings.atlasOutputDirectory);
+            settings.clipOutputDirectory = PathSelection("Anim Clip Directory", settings.clipOutputDirectory);
 
-        settings.controllerPolicy = (AnimControllerOutputPolicy) EGL.EnumPopup("Anim Controller Policy", settings.controllerPolicy);
-        if (settings.controllerPolicy == AnimControllerOutputPolicy.CreateOrOverride) {
-            settings.animControllerOutputPath = PathSelection("Anim Controller Directory", settings.animControllerOutputPath);
+            settings.controllerPolicy = (AnimControllerOutputPolicy) EGL.EnumPopup("Anim Controller Policy", settings.controllerPolicy);
+            if (settings.controllerPolicy == AnimControllerOutputPolicy.CreateOrOverride) {
+                settings.animControllerOutputPath = PathSelection("Anim Controller Directory", settings.animControllerOutputPath);
+            }
+
+            settings.dataOutputDirectory = PathSelection("Anim Data Directory", settings.dataOutputDirectory);
+
+            if (EditorGUI.EndChangeCheck()) {
+                EditorUtility.SetDirty(settings);
+            }
         }
 
-        settings.dataOutputDirectory = PathSelection("Anim Data Directory", settings.dataOutputDirectory);
+        string PathSelection(string id, string path) {
+            EGL.BeginHorizontal();
+            EGL.PrefixLabel(id);
+            path = EGL.TextField(path);
+            if (GL.Button("...", GL.Width(30))) {
+                path = GetAssetPath(EditorUtility.OpenFolderPanel("Select path", path, ""));
+            }
 
-        if (EditorGUI.EndChangeCheck()) {
-            EditorUtility.SetDirty(settings);
+            EGL.EndHorizontal();
+            return path;
         }
+
+        static string GetAssetPath(string path) {
+            if (path == null) {
+                return null;
+            }
+
+            var projectPath = Application.dataPath;
+            projectPath = projectPath.Substring(0, projectPath.Length - "/Assets".Length);
+            path = Remove(path, projectPath);
+
+            if (path.StartsWith("\\") || path.StartsWith("/")) {
+                path = path.Remove(0, 1);
+            }
+
+            if (!path.StartsWith("Assets") && !path.StartsWith("/Assets")) {
+                path = Path.Combine("Assets", path);
+            }
+
+            path.Replace('\\', '/');
+
+            return path;
+        }
+
+        static string Remove(string s, string exactExpression) {
+            return s.Replace(exactExpression, "");
+        }
+
     }
-
-    string PathSelection(string id, string path) {
-        EGL.BeginHorizontal();
-        EGL.PrefixLabel(id);
-        path = EGL.TextField(path);
-        if (GL.Button("...", GL.Width(30))) {
-            path = GetAssetPath(EditorUtility.OpenFolderPanel("Select path", path, ""));
-        }
-
-        EGL.EndHorizontal();
-        return path;
-    }
-
-    static string GetAssetPath(string path) {
-        if (path == null) {
-            return null;
-        }
-
-        var projectPath = Application.dataPath;
-        projectPath = projectPath.Substring(0, projectPath.Length - "/Assets".Length);
-        path = Remove(path, projectPath);
-
-        if (path.StartsWith("\\") || path.StartsWith("/")) {
-            path = path.Remove(0, 1);
-        }
-
-        if (!path.StartsWith("Assets") && !path.StartsWith("/Assets")) {
-            path = Path.Combine("Assets", path);
-        }
-
-        path.Replace('\\', '/');
-
-        return path;
-    }
-
-    static string Remove(string s, string exactExpression) {
-        return s.Replace(exactExpression, "");
-    }
-
-}
 
 }
