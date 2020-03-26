@@ -28,7 +28,7 @@ namespace MetaSpritePlus {
 
         public SpriteAlignment alignment;
 
-        public Vector2 customPivot;
+        public Vector2 defaultPivot;
 
         public bool densePacked = true;
 
@@ -50,7 +50,7 @@ namespace MetaSpritePlus {
 
         public Vector2 PivotRelativePos {
             get {
-                return alignment.GetRelativePos(customPivot);
+                return alignment.GetRelativePos(defaultPivot);
             }
         }
 
@@ -90,13 +90,14 @@ namespace MetaSpritePlus {
 
             EGL.Space();
 
-            settings.alignment = (SpriteAlignment) EGL.EnumPopup(new GUIContent("Sprite Align",
-                "Where the pivot aligns to the sprite\n" +
-                "Note that a @pivot layer will override this"),
+            settings.alignment = (SpriteAlignment) EGL.EnumPopup(new GUIContent("Default Pivot",
+                "The default position of the pivot in relation to the sprite\n" +
+                "Only used for files without a base @pivot layer"),
                 settings.alignment);
 
             if (settings.alignment == SpriteAlignment.Custom) {
-                settings.customPivot = EGL.Vector2Field("Custom Pivot", settings.customPivot);
+                settings.defaultPivot = EGL.Vector2Field(new GUIContent("Custom", "Use a value from 0 to 1, where (0, 0) " +
+                    "is the bottom-left of the sprite, and (1, 1) is the top-right of the sprite"), settings.defaultPivot);
             }
 
             settings.densePacked = EGL.Toggle("Dense Pack", settings.densePacked);

@@ -76,7 +76,7 @@ namespace MetaSpritePlus {
         public string layerName;            // original name of layer/group
         public string baseName;             // the base group or layer name without parameters (before any parameters)
         public string userData { get; set; }
-        public string targetPath;           // path to target GameObject for layer or group  TODO: rename to targetPath
+        public string targetPath;           // path to target GameObject for layer or group
         public LayerType type;
 
         // --- META

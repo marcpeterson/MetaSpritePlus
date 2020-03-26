@@ -6,13 +6,13 @@ namespace MetaSpritePlus {
 
     public static class ExtSpriteAlignment {
 
-        public static Vector2 GetRelativePos(this SpriteAlignment alignment, Vector2 customPivot) {
+        public static Vector2 GetRelativePos(this SpriteAlignment alignment, Vector2 defaultPivot) {
             switch (alignment) {
                 case SpriteAlignment.BottomCenter: return new Vector2(0.5f, 0);   
                 case SpriteAlignment.BottomLeft:   return new Vector2(0f, 0);     
                 case SpriteAlignment.BottomRight:  return new Vector2(1f, 0);     
                 case SpriteAlignment.Center:       return new Vector2(0.5f, 0.5f);
-                case SpriteAlignment.Custom:       return customPivot;   
+                case SpriteAlignment.Custom:       return defaultPivot;   
                 case SpriteAlignment.LeftCenter:   return new Vector2(0, 0.5f);   
                 case SpriteAlignment.RightCenter:  return new Vector2(1, 0.5f);   
                 case SpriteAlignment.TopCenter:    return new Vector2(0.5f, 1f);  

@@ -64,10 +64,11 @@ namespace MetaSpritePlus.Internal {
                     continue;
                 }
 
-                var metadata = new SpriteMetaData();
-                metadata.name = target.spriteName + "_" + image.frame;
-                metadata.alignment = (int) SpriteAlignment.Custom;
-                metadata.rect = new Rect(pos.x, pos.y, image.finalWidth, image.finalHeight);
+                // The metadata describes the sprite in Unity's terms
+                var metadata        = new SpriteMetaData();
+                metadata.name       = target.spriteName + "_" + image.frame;
+                metadata.alignment  = (int) SpriteAlignment.Custom;
+                metadata.rect       = new Rect(pos.x, pos.y, image.finalWidth, image.finalHeight);
 
                 Vector2 newPivotNorm;
                 Vector2 cropPos = new Vector2(image.minx, file.height - image.maxy - 1);
