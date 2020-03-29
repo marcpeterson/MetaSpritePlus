@@ -113,8 +113,8 @@ namespace MetaSpritePlus.Internal {
 
                 metadata.pivot = newPivotNorm;
                 ctx.spriteCropPositions.Add(cropPos);
-                ctx.spriteDimensions.Add(new Vector2(image.finalWidth, image.finalHeight));
-                ctx.spritePivots.Add(newPivotNorm);
+                ctx.spriteDimensions.Add(new Vector2(image.finalWidth, image.finalHeight)); // TODO: need to do this for each target
+                ctx.spritePivots.Add(newPivotNorm);                                         // TODO: need to do this for each target
 
                 metaList.Add(metadata);
             }

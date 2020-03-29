@@ -175,7 +175,7 @@ namespace MetaSpritePlus {
             };
 
             try {
-//                context.animData.data = new Dictionary<string, Dictionary<string, List<FrameData>>>();
+//                context.animData.data = new Dictionary<string, Dictionary<string, List<FrameData>>>();        // is this needed or legacy?
 
                 ImportStage(context, Stage.LoadFile);
                 LoadFile(context, settings, path);
