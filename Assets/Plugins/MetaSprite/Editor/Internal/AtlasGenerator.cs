@@ -74,10 +74,7 @@ namespace MetaSpritePlus.Internal {
                 Vector2 cropPos = new Vector2(image.minx, file.height - image.maxy - 1);
 
                 // TODO: if no pivots, can we skip for this frame?
-
-                Vector2 pivotTex = target.pivots.Where(it => it.frame == image.frame)
-                    .Select(it => it.coord)
-                    .FirstOrDefault();        // default is (0,0)
+                Vector2 pivotTex = ( target.pivots.ContainsKey(image.frame) ) ? target.pivots[image.frame] : Vector2.zero;
 
                 // get pivot coordinates in relation to sprite's position in final texture
                 pivotTex -= cropPos;
@@ -89,7 +86,7 @@ namespace MetaSpritePlus.Internal {
                 newPivotNorm =  Vector2.Scale(pivotTex, new Vector2(1.0f / image.finalWidth, 1.0f / image.finalHeight));
 
                 // save everything
-                target.pivotNorms.Add(image.frame, new PivotFrame { frame = image.frame, coord = newPivotNorm });
+                target.pivotNorms.Add(image.frame, newPivotNorm);
                 target.dimensions.Add(image.frame, new Dimensions { frame = image.frame, width = image.finalWidth, height = image.finalHeight });
                 metadata.pivot = newPivotNorm;
                 metaList.Add(metadata);

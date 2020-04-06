@@ -87,8 +87,7 @@ namespace MetaSpritePlus
 
     public class AnimData : ScriptableObject
     {
-        public float ppu;             // needed to convert sprite dimensions/coordinates to world dimensions/coordinates
-        public string pixelOrigin;
+        public float ppu;                   // needed to convert sprite dimensions/coordinates to world dimensions/coordinates
         public AnimDictionary animations;   // was animDict
 
         void OnEnable()
@@ -181,18 +180,6 @@ namespace MetaSpritePlus
             to = new Vector2(to.x * toDims.x, to.y * toDims.y);
             if ( flipTo ) {
                 to.x = -to.x;
-            }
-
-            // if a pixel's origin is its bottom-left (instead of center), AND the flip status changes between aniamations,
-            // then we'll need to compensate by on pixel in world-space to align things.
-            if ( flipFrom != flipTo && pixelOrigin == "BottomLeft" ) {
-                if ( !flipFrom && flipTo ) {
-                    if ( debug ) Debug.Log($"-1 to pixel due to flipFrom=false, flipTo=true");
-                    to.x -= 1f/ppu;
-                } else if ( flipFrom && !flipTo ) {
-                    if ( debug ) Debug.Log($"-1 from pixel due to flipFrom=true, flipTo=false");
-                    from.x -= 1f/ppu;
-                }
             }
 
             Vector3 diff = new Vector3(to.x - from.x, to.y - from.y, 0);

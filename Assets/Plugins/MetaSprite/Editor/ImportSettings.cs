@@ -15,16 +15,10 @@ namespace MetaSpritePlus {
         Skip, CreateOrOverride
     }
 
-    public enum PixelOrigin {
-        Center, BottomLeft
-    }
-
     [CreateAssetMenu(menuName = "ASE Import Settings")]
     public class ImportSettings : ScriptableObject {
 
         public int ppu = 32;
-
-        public PixelOrigin pixelOrigin = PixelOrigin.Center;
 
         public SpriteAlignment alignment;
 
@@ -81,12 +75,6 @@ namespace MetaSpritePlus {
             settings.ppu = EGL.IntField(new GUIContent("Pixel Per Unit",
                 "How many pixels span one Unity unit"),
                 settings.ppu);
-
-            settings.pixelOrigin = (PixelOrigin) EGL.EnumPopup(new GUIContent("Pixel Origin",
-                "Where on the sprite's pixel data aligns to." +
-                "\nCenter: center of the pixel (recommended)" +
-                "\nBottom Left: bottom left of the pixel (original)"),
-                settings.pixelOrigin);
 
             EGL.Space();
 
