@@ -73,49 +73,25 @@ namespace MetaSpritePlus.Internal {
                 Vector2 newPivotNorm;
                 Vector2 cropPos = new Vector2(image.minx, file.height - image.maxy - 1);
 
-                if ( target == null ) {
+                // TODO: if no pivots, can we skip for this frame?
 
-                    /* TODO: UNTESTED */
+                Vector2 pivotTex = target.pivots.Where(it => it.frame == image.frame)
+                    .Select(it => it.coord)
+                    .FirstOrDefault();        // default is (0,0)
 
-                    Vector2 oldPivotNorm = settings.PivotRelativePos;
+                // get pivot coordinates in relation to sprite's position in final texture
+                pivotTex -= cropPos;
 
-                    // calculate sprite pivot position relative to the entire source texture
-                    var oldPivotTex = Vector2.Scale(oldPivotNorm, new Vector2(file.width, file.height));
+                // default pixel origin is bottom left. center to the actual pixel by adding 0.5 in x and y directions
+                pivotTex += new Vector2(0.5f, 0.5f);
 
-                    // re-calculate sprite pivot position relative to the sprite image's position within the texture.
-                    // texture coords are from top-left.  but unity coords are from bot-left.  so y-value must be recalulated from bottom.
-                    var newPivotTex = oldPivotTex - new Vector2(image.minx, file.height - image.maxy - 1);
+                // now translate pivot's sprite/frame location as a percentage of its dimensions (1x1)
+                newPivotNorm =  Vector2.Scale(pivotTex, new Vector2(1.0f / image.finalWidth, 1.0f / image.finalHeight));
 
-                    // Note: no need to offset by half a pixel because we're not using sprite pixels to represent the pivot
-
-                    // normalize the pivot position based on the dimensions of the sprite's image.
-                    newPivotNorm = Vector2.Scale(newPivotTex, new Vector2(1.0f / image.finalWidth, 1.0f / image.finalHeight));
-                } else {
-//                    Debug.Log($"  - target {target.targetPath} - pivot count: {target.pivots.Count}");
-
-                    // TODO: if no pivots, can we skip for this frame?
-
-
-                    Vector2 pivotTex = target.pivots.Where(it => it.frame == image.frame)
-                        .Select(it => it.coord)
-                        .FirstOrDefault();        // default is (0,0)
-
-                    pivotTex -= cropPos;
-
-                    // default pixel origin is bottom left.  if centered, add half a pixel in x and y directions
-                    if ( ctx.settings.pixelOrigin == PixelOrigin.Center ) {
-                        pivotTex += new Vector2(0.5f, 0.5f);
-                    }
-
-                    // now translate pivot's sprite/frame location as a percentage of its dimensions (1x1)
-                    newPivotNorm =  Vector2.Scale(pivotTex, new Vector2(1.0f / image.finalWidth, 1.0f / image.finalHeight));
-                }
-
+                // save everything
+                target.pivotNorms.Add(image.frame, new PivotFrame { frame = image.frame, coord = newPivotNorm });
+                target.dimensions.Add(image.frame, new Dimensions { frame = image.frame, width = image.finalWidth, height = image.finalHeight });
                 metadata.pivot = newPivotNorm;
-                ctx.spriteCropPositions.Add(cropPos);
-                ctx.spriteDimensions.Add(new Vector2(image.finalWidth, image.finalHeight)); // TODO: need to do this for each target
-                ctx.spritePivots.Add(newPivotNorm);                                         // TODO: need to do this for each target
-
                 metaList.Add(metadata);
             }
 

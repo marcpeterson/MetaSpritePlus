@@ -20,25 +20,38 @@ namespace MetaSpritePlus {
 
         public override void Process(ImportContext ctx, Layer layer)
         {
-            // the name of the data variable should be the first parameter. eg @data("leg l")
-            string dataName = layer.GetParamString(0);
-
             var file = ctx.file;
 
             var importer = AssetImporter.GetAtPath(ctx.atlasPath) as TextureImporter;
             var spriteSheet = importer.spritesheet;
+
+            string dataName = "";
+            if ( layer.parameters.Count == 1 ) {
+                // if one parameter, then it's the name of the data point
+                dataName = layer.GetParamString(0);
+            } else if ( layer.parameters.Count > 1 ) {
+                // if two parameters, then 2nd is the name
+                dataName = layer.GetParamString(1);
+            }
+
+            var data = new FrameData();
+
+            if ( ! ctx.targets.ContainsKey(layer.targetPath) ) {
+                Debug.LogWarning($"@data layer '{layer.layerName}' has invalid target '{layer.targetPath}' and has been skipped");
+                return;
+            }
+
+            var target = ctx.targets[layer.targetPath];
 
             // each tag represents a different animation.  look at each frame of each tag.  store coordinates of any visible pixels.
             // these represent the data points.
             foreach ( var tag in ctx.file.frameTags ) {
                 string animName = tag.name;
                 Vector3 distance = Vector3.zero;
-                var frameDataList = new FrameDataList {
-                    frames = new List<FrameData>()
-                };
                 int numFrames = tag.to - tag.from + 1;
 
                 for ( int i = tag.from, j = 0; i <= tag.to; ++i, j++ ) {
+                    int frameNum = i - tag.from;
                     var frameData = new FrameData { frame = j, coords = new List<Vector2>() };
                     Cel cel;
                     file.frames[i].cels.TryGetValue(layer.index, out cel);
@@ -53,37 +66,44 @@ namespace MetaSpritePlus {
                                 int texY = -(cel.y + y) + file.height - 1;
 
                                 // store position of any visible pixels
-                                var pxl = cel.GetPixelRaw(x, y);
-                                if ( pxl.a > 0.1f ) {
-                                    // start the coordinate of the pixel on the layer (from bottom left corner)
+                                var pixel = cel.GetPixelRaw(x, y);
+                                if ( pixel.a > 0.1f ) {
+                                    // coordinate of the pixel on the original texture image (from bottom left corner)
                                     Vector2 coord = new Vector2(texX, texY);
 
-                                    // default pixel origin is bottom left.  if centered, add half a pixel in x and y directions
-                                    if ( ctx.settings.pixelOrigin == PixelOrigin.Center ) {
-                                        coord += new Vector2(0.5f, 0.5f);
+                                    // get the target's pivot location on the original texture
+                                    if ( ! target.pivots.Exists(it => it.frame == frameNum) ) {
+                                        Debug.Log($"@data layer '{layer.layerName}' has no pivot for frame {frameNum}");
                                     }
 
-                                    // calculate position in relation to pivot
-                                    Vector2 pivot = spriteSheet[i].pivot;
-                                    Vector2 pivotPxl = new Vector2(pivot.x * spriteSheet[i].rect.width, pivot.y * spriteSheet[i].rect.height);
+                                    Vector2 pivotTex = target.pivots.Where(it => it.frame == frameNum)
+                                        .Select(it => it.coord)
+                                        .FirstOrDefault();        // default is (0,0)
 
-                                    // get coordinate relative to pivot
-                                    coord -= ctx.spriteCropPositions[i];
-                                    coord -= pivotPxl;
+                                    // subtract pivot location to make coordinate relative to target's pivot
+                                    coord -= pivotTex;
 
+                                    // default pixel origin is bottom left. center to the actual pixel by adding 0.5 in x and y directions
+                                    coord += new Vector2(0.5f, 0.5f);
+
+                                    // convert coordinate relative to target sprite's dimension
+                                    // could also use ctx.animData.animations[animName].targets[layer.targetPath].sprites[frameNum]
+                                    Dimensions dimensions;
+                                    if ( target.dimensions.TryGetValue(frameNum, out dimensions) ) {
+                                        coord = new Vector2(coord.x/dimensions.width, coord.y/dimensions.height);
+                                    } else {
+                                        // if target doesn't have dimensions, then it has no sprite. coordinate cannot be normalized based
+                                        // on sprite's size. just store the pixel location.
+                                        // Debug.Log($"@data layer '{layer.layerName}' has no sprite for frame {frameNum}");
+                                    }
+
+                                    /* TODO - calculate previous pivot cumulative distance
                                     // if calculating "prev pivot" data, and this is first pixel (should only be one), then store its distance
                                     if ( dataName == "prev pivot" && pixelCount == 0 ) {
                                         // coord is distance from pivot.  negate to make positive, and round to get rid of float errors
                                         distance += new Vector3(-Mathf.Round(coord.x), -Mathf.Round(coord.y), 0);
                                     }
-
-                                    // points are all relative to the sprite's bounding rectangle, which is 1 by 1 in both dimensions 
-                                    // regardless of sprite size.  So (0.5, 0.5) would be the center of the sprite.
-                                    // it's ok for points to be outside the bounding rectangle.  they'll just be less than 0, or greater than 1.
-                                    // WHY? so if the sprite is transformed, everything stays relative. You can multiply points by the transforms
-                                    // to get their position relative to the transform.
-                                    // NOTE: spriteSheet[i].rect.width/height are in pixels
-                                    coord = new Vector2(coord.x/spriteSheet[i].rect.width, coord.y/spriteSheet[i].rect.height);
+                                    */
 
                                     frameData.coords.Add(coord);
                                     ++pixelCount;
@@ -92,30 +112,36 @@ namespace MetaSpritePlus {
                         }
 
                         if ( pixelCount > 0 ) {
-                            frameDataList.frames.Add(frameData);
+                            if ( ! ctx.animData.animations[animName].targets.ContainsKey(layer.targetPath) ) {
+                                // Debug.LogWarning($"@data layer '{layer.layerName}' has a target with no sprites. Saving anyways.");
+                                ctx.animData.animations[animName].targets.Add(layer.targetPath, new TargetData());
+                            }
+
+                            ctx.animData.animations[animName].targets[layer.targetPath].data.Add($"{dataName}::{frameNum}", frameData);
                         }
                     }
                 }
 
-                // if we've collected all the data for this animation, save it in appropriate dictionary spot
-                if ( frameDataList.frames.Count > 0 ) {
-                    if ( ctx.animData.animDict.ContainsKey(animName) ) {
-                        ctx.animData.animDict[animName].frameDict.Add(dataName, frameDataList);
-                        if ( dataName == "prev pivot" ) {
-                            ctx.animData.animDict[animName].distance = distance;
-                        }
-                    } else {
-                        ctx.animData.animDict.Add(animName, new AnimList {
-                            numFrames = numFrames,
-                            distance = distance,
-                            frameDict = new FrameDictionary() { {
-                                dataName,
-                                frameDataList
-                            } }
-                        });
+                /*
+                // if we've collected all the data for this animation, save it
+                if ( data.frames.Count > 0 ) {s
+
+                    if ( !ctx.targets.ContainsKey(layer.targetPath) ) {
+                        Debug.LogWarning($"@data layer '{layer.layerName}' has invalid target '{layer.targetPath}' and has been skipped");
+                        continue;
                     }
-//                    Debug.Log(ctx.animData.data["run e"]);
+
+                    if ( ! ctx.animData.animations.ContainsKey(animName) ) {
+                        Debug.LogWarning($"@data layer '{layer.layerName}' has invalid animation '{animName}' and has been skipped");
+                    }
+
+                    ctx.animData.animations[animName].targets[layer.targetPath].data.Add(dataName, data);
+                    
+                    if ( dataName == "prev pivot" ) {
+                        // ctx.animData.animations[animName].targets[layer.targetPath].distance = distance;
+                    }
                 }
+                */
             }
 
 //            Debug.Log(data);

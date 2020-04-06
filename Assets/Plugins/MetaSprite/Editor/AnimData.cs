@@ -11,17 +11,22 @@ using GenericToDataString;  // for object dumper
  * Since multiple tags can deliminate different animations in the same file, we save data for each animation.
  * Data will be saved in a ScriptingObject asset file with the same name as the base name in the Aesprite Import config.
  *   AnimData : ScriptableObject {
- *     ppu                    : currently needed to compensate for sprite flipping (calculates world-coordinates per pixel)
- *     animDict               : AnimDictionary <
- *       "{anim name}",       : key is name of animation, such as "run e"
- *       AnimList {
- *         numFrames          : number of frames for this animation
- *         frameDict          : FrameDictionary <
- *           "{data name}",   : key is name of data point(s), such as "l foot pos"
- *             frames         : List <FrameData> {
- *               frame,       : 0-indexed frame number
- *               coords,      : List <Vector2> of all coords
- *   }}}
+ *     ppu                                  : currently needed to compensate for sprite flipping (calculates world-coordinates per pixel)
+ *     animation<"anim name", Animation>    : AnimDictionary key is name of animation, such as "run e"
+ *       numFrames,                         : number of frames in this animation
+ *       targets<"path", TargetData>        : TargetDictionary key is path to game object, such as "/body/top/l arm"
+ *         path,                            : path to target's game object, such as "/body/top/l arm"
+ *         atlasId,                         : base name of target in sprite atlas
+ *         distance,                        : optional distance between all pivots. only filled if "prev pivot' found
+ *         sprites<frame, SpriteData></frame>   : one entry per frame of animation
+ *           frame,                             : frame number
+ *           width,                             : width of sprite in pixels
+ *           height,                            : height of sprite in pixels
+ *           pivot                              : sprite's pivot, from 0-1 in relation to pixel width/height
+ *         data<"data name::frame", FrameData   : Data key is name of data point. eg "l foot pos"
+ *           frame,                             : frame number
+ *           coords<Vector2>                    : list of coordinates
+ *         
  *   
  * HINTS
  *  - Aesprite defaults the frist frame number at 1.  But you can change this to 0.  Either way, frames in framedata will be numbered
@@ -33,46 +38,64 @@ using GenericToDataString;  // for object dumper
 
 namespace MetaSpritePlus
 {
+    [System.Serializable]
+    public class Animation                               // was AnimList
+    {
+        public int numFrames = 0;
+        [SerializeField] public TargetDictionary targets = new TargetDictionary();
+    }
+
+    [System.Serializable]
+    public class TargetData
+    {
+        public string path;                     // path to gameobject we will render to. use this for TargetDictionary key?
+        public string atlasId;                  // base name of sprite in atlas for this target. must be appended by "_{frame num}" for an actual sprite.
+        [SerializeField] public Vector3 distance    = Vector3.zero;                 // will only be filled if data "prev pivot" found.  it's the sum of all pivot differences.
+        [SerializeField] public SpriteDictionary sprites = new SpriteDictionary();  // indexed by frame number?
+        [SerializeField] public DataDictionary data = new DataDictionary();
+    }
 
     [System.Serializable]
     public class FrameData
     {
         [SerializeField] public int frame;
-        [SerializeField] public List<Vector2> coords;
+        [SerializeField] public List<Vector2> coords = new List<Vector2>();       // each frame may have more than one coordinate of data
     }
+
+    [System.Serializable]
+    public class SpriteData
+    {
+        [SerializeField] public int frame;      // also key to SpriteDictionary?
+        [SerializeField] public int width  = 0; // width of sprite in pixels
+        [SerializeField] public int height = 0; // height of sprite in pixels
+        [SerializeField] public Vector2 pivot;  // sprite pivot (from 0 to 1)
+    }
+
+
+    [System.Serializable]
+    public class AnimDictionary : SerializableDictionaryBase<string, Animation> { }       // indexed by name of animation. eg: 'run e'
+
+    [System.Serializable]
+    public class DataDictionary : SerializableDictionaryBase<string, FrameData> { }       // indexed by name of target and data point. eg: '/bot/l foot/base::l foot pos'. was FrameDictionary
+
+    [System.Serializable]
+    public class TargetDictionary : SerializableDictionaryBase<string, TargetData> { }   // indexed by path to object?
     
     [System.Serializable]
-    public class FrameDataList
-    {
-        [SerializeField] public List<FrameData> frames;
-    }
-
-    [System.Serializable]
-    public class FrameDictionary : SerializableDictionaryBase<string, FrameDataList> { }
-
-    [System.Serializable]
-    public class AnimList
-    {
-        public int numFrames     = 0;
-        public Vector3 distance  = Vector3.zero;    // will only be filled if data "prev pivot" found.  it's the sum of all pivot differences.
-        [SerializeField] public FrameDictionary frameDict;
-    }
-
-    [System.Serializable]
-    public class AnimDictionary : SerializableDictionaryBase<string, AnimList> { }
+    public class SpriteDictionary : SerializableDictionaryBase<int, SpriteData> { }      // indexed by frame of animation
 
 
     public class AnimData : ScriptableObject
     {
-        public float ppu = 32;  // needed to convert sprite dimensions to world dimensions
+        public float ppu;             // needed to convert sprite dimensions/coordinates to world dimensions/coordinates
         public string pixelOrigin;
-        public AnimDictionary animDict;
+        public AnimDictionary animations;   // was animDict
 
         void OnEnable()
         {
             // if already exists or serialized avoid multiple instantiation to avoid memory leak
-            if ( animDict == null ) {
-                animDict = new AnimDictionary();
+            if ( animations == null ) {
+                animations = new AnimDictionary();
             }
         }
 
@@ -96,13 +119,18 @@ namespace MetaSpritePlus
          */
         public List<Vector2> FindAllData(string clipName, string dataName, int frame)
         {
-            if ( animDict.TryGetValue(clipName, out AnimList animList) ) {
+            if ( animations.TryGetValue(clipName, out Animation animList) ) {
+
+                Debug.Log("FindAllData() migration incomplete");
+
+                /*
                 if ( animList.frameDict.TryGetValue(dataName, out FrameDataList frameDataList) ) {
                     FrameData frameData = frameDataList.frames.Find(x => (x.frame == frame));
                     if ( frameData != null ) {
                         return frameData.coords;
                     }
                 }
+                */
             }
 
             return null;
@@ -253,8 +281,8 @@ namespace MetaSpritePlus
 
         public int GetNumFrames(string clipName)
         {
-            if ( animDict.TryGetValue(clipName, out AnimList animList) ) {
-                return animList.numFrames;
+            if ( animations.TryGetValue(clipName, out Animation animation) ) {
+                return animation.numFrames;
             }
 
             Debug.LogWarning($"no frame count for '{clipName}' in animation data");
@@ -262,13 +290,16 @@ namespace MetaSpritePlus
         }
 
 
-        public Vector3 GetDistance(string clipName)
+        public Vector3 GetDistance(string clipName, string targetName)
         {
-            if ( animDict.TryGetValue(clipName, out AnimList animList) ) {
-                return animList.distance;
+            Debug.LogWarning("GetDistance() needs updating");
+            if ( animations.TryGetValue(clipName, out Animation animation) ) {
+                if ( animation.targets.TryGetValue(targetName, out TargetData targetData ) ) {
+                    return targetData.distance;
+                }
             }
 
-            Debug.LogWarning($"no distance for '{clipName}' in animation data");
+            Debug.LogWarning($"no distance for clip:'{clipName}' target:'{targetName}'");
             return Vector3.zero;
         }
 

@@ -21,22 +21,13 @@ namespace MetaSpritePlus {
         public string fileDirectory;
         public string fileName;
         public string fileNameNoExt;
-    
+
         public string atlasPath;
         public string animControllerPath;
         public string animClipDirectory;
         public string animDataDirectory;
 
         public List<Sprite> generatedSprites = new List<Sprite>();
-
-        // The local texture coordinate for bottom-left point of each frame's crop rect, in Unity texture space.
-        public List<Vector2> spriteCropPositions = new List<Vector2>();
-
-        // dimensions of each sprite, in pixels?
-        public List<Vector2> spriteDimensions = new List<Vector2>();
-
-        // where each sprite's pivot is, as a percentage of its dimentions (1x1)
-        public List<Vector2> spritePivots = new List<Vector2>();    // TODO: deprecate, use a default target if no split sprite
 
         // stored date about each sprite target
         public Dictionary<string, Target> targets = new Dictionary<string, Target>();
@@ -50,6 +41,9 @@ namespace MetaSpritePlus {
 
     /**
      * Pivots are used in atlas generation to determine (0,0) of the sprite.  It may be outside the bounds of the sprite, eg (-2,-5)
+     * 
+     * TODO: use a list of Vector2. no need for frame number since list index can be the frame number
+     * 
      */
     public class PivotFrame
     {
@@ -57,28 +51,31 @@ namespace MetaSpritePlus {
         public Vector2 coord;   // coordinate, in pixels, of the pivot in sprite-space
     }
 
-    /**
-     * Offsets are the difference, in pixels, between a pivot and it's parent for a given frame.  These are used in the animation clip to
-     * move the current object in relation to its parent.
-     */
-    public class OffsetFrame
+    public class Dimensions
     {
         public int frame;
-        public Vector2 coord;   // offset, in pixels, between parent and child pivots in sprite-space
+        public int width;
+        public int height;
     }
 
     /**
      * Stores data for each target.  Each split sprite will render to a target.  This class is used to collect
      * data related to the target.
+     * 
+     * TODO: consider using animData as storage? Most things end up there. seems a bit weird to save data here
+     *       only to transfer it again to the final animData serialized object. Although Targets contain
+     *       housekeeping and non-serialized data too...
      */
     public class Target {
         public static int DEFAULT_PIVOT = -100; // default pivot index
         public string path;                     // path to gameobject we will render to
         public string spriteName;               // base name of sprite in atlas for this target
         public int pivotIndex = DEFAULT_PIVOT;  // the target's pivot layer
-        public List<PivotFrame> pivots = new List<PivotFrame>();
-        public List<OffsetFrame> offsets = new List<OffsetFrame>();
-        public int numPivots = 0;
+        public List<PivotFrame> pivots = new List<PivotFrame>();        // pivots in texture space. pixel coordinates.
+        public Dictionary<int, Vector2> offsets       = new Dictionary<int, Vector2>();    // offset, in pixels, between this target's pivots and its parent's pivots. (0,0) if no parent pivots.
+        public Dictionary<int, PivotFrame> pivotNorms = new Dictionary<int, PivotFrame>(); // pivots in sprite space. coordinate is 0-1 based on sprite dimensions.
+        public Dictionary<int, Dimensions> dimensions = new Dictionary<int, Dimensions>(); // dimensions of each animation frame, in pixels
+        public int numPivotLayers = 0;          // only used for internal housekeeping and warn user if target has more than one pivot layer
         public int numLayers = 0;
     }
 
@@ -198,8 +195,6 @@ namespace MetaSpritePlus {
                 ImportStage(context, Stage.GenerateController);
                 GenerateAnimController(context);
 
-                /*
-
                 ImportStage(context, Stage.InvokeMetaLayerProcessor);
 
                 context.file.layers
@@ -225,40 +220,18 @@ namespace MetaSpritePlus {
                 foreach ( var tag in context.file.frameTags ) {
                     string animName = tag.name;
                     int numFrames = tag.to - tag.from + 1;
-                    if ( context.animData.animDict.ContainsKey(animName) ) {
-                        context.animData.animDict[animName].numFrames = numFrames;
+                    if ( context.animData.animations.ContainsKey(animName) ) {
+                        context.animData.animations[animName].numFrames = numFrames;
                     } else {
-                        context.animData.animDict.Add(animName, new AnimList
-                        {
-                            numFrames = numFrames,
-                            frameDict = new FrameDictionary(),
-                        });
+                        context.animData.animations.Add(animName, new Animation { numFrames = numFrames });
                     }
                 }
 
-                // save each frame's pivot and dimensions in animData
-                foreach ( var tag in context.file.frameTags ) {
-                    string animName = tag.name;
-
-                    var pivotDataList = new FrameDataList { frames = new List<FrameData>() };
-                    var dimsDataList = new FrameDataList { frames = new List<FrameData>() };
-
-                    for ( int i=tag.from, j=0; i <= tag.to; i++, j++ ) {
-                        pivotDataList.frames.Add(new FrameData { frame = j, coords = new List<Vector2> { context.spritePivots[i] } });
-                        dimsDataList.frames.Add(new FrameData { frame = j, coords = new List<Vector2> { context.spriteDimensions[i] } });
-                    }
-                    context.animData.animDict[animName].frameDict.Add("pivot", pivotDataList);
-                    context.animData.animDict[animName].frameDict.Add("dims", dimsDataList);
-                }
-
-                
                 // var importer = AssetImporter.GetAtPath(context.atlasPath) as TextureImporter;
                 // var spriteSheet = importer.spritesheet;
                 // Debug.Log("== SPRITESHEET ==");
                 // Debug.Log($"{spriteSheet[0].rect}");
                 // Debug.Log($"{spriteSheet[0].pivot}");
-                // Debug.Log(ObjectDumper.Dump(context.spriteDimensions));
-                // Debug.Log(ObjectDumper.Dump(context.spritePivots));
 
                 ImportStage(context, Stage.SaveAnimData);
                 var filePath = context.animDataDirectory + "/" + context.settings.baseName + " data.asset";
@@ -273,15 +246,14 @@ namespace MetaSpritePlus {
                 } else {
                     asset.ppu = context.settings.ppu;
                     asset.pixelOrigin = context.settings.pixelOrigin.ToString();
-                    // merge any new animations with old (and overwrite matching old)
-                    foreach ( KeyValuePair<string, AnimList> item in context.animData.animDict ) {
-                        asset.animDict[item.Key] = item.Value;
+                    // merge any new animations with old (and overwrite any that match with old)
+                    foreach ( KeyValuePair<string, Animation> item in context.animData.animations ) {
+                        asset.animations[item.Key] = item.Value;
                     }
                     EditorUtility.SetDirty(asset);
                     AssetDatabase.SaveAssets();
                 }
 
-                */
 
             } catch (Exception e) {
                 Debug.LogException(e);
@@ -346,9 +318,9 @@ namespace MetaSpritePlus {
                     debugStr += Util.IndentColTab(str: $"{layer.index} - {layer.layerName}", indent: layer.childLevel, numCharInCol: 40) + target + "\n";
                 });
 
-            // now set up targets for pivot layers.  this is so we can warn users if a pivot target doesn't have any content layers.
+            // now set up targets for pivot and data layers.  this is so we can warn users if a pivot target doesn't have any content layers.
             ctx.file.layers
-                .Where(layer => layer.type == LayerType.Meta && layer.actionName == "pivot")
+                .Where(layer => layer.type == LayerType.Meta && ( layer.actionName == "pivot" || layer.actionName == "data") )
                 .OrderBy(layer => layer.index)
                 .ToList()
                 .ForEach(layer =>
@@ -363,8 +335,17 @@ namespace MetaSpritePlus {
 
         private static string ExtractLayerTarget(ImportContext ctx, Layer layer)
         {
-            string targetPath  = "";
-            if ( layer.parameters.Count == 0 ) {
+            string targetPath = "";
+
+            if ( layer.actionName == "data" && layer.parameters.Count > 1 ) {
+                // data layer requires a name. if 2 parameters, then 1st is a target
+                targetPath = layer.GetParamString(0);
+            } else if ( layer.actionName != "data" && layer.parameters.Count > 0 ) {
+                // target path should be the first (and only) parameter
+                targetPath = layer.GetParamString(0);
+            }
+
+            if ( targetPath == "" ) {
                 // if layer/group has no target parameter, then it's not split.  target is its parent target.
                 var parentLayer = ctx.file.FindLayer(layer.parentIndex);
                 if ( layer.index == -1 ) {
@@ -375,14 +356,11 @@ namespace MetaSpritePlus {
                     Debug.LogWarning($"parent layer index {layer.parentIndex} not found");
                 }
             } else {
-                string path = layer.GetParamString(0);  // target path should be the first (and only) parameter
-                path.TrimEnd('/');                      // clean sloppy user data
-                if ( path.StartsWith("/") ) {           // if an absolute path, then use it
-                    targetPath = path;
-                } else {                                // else if a relative path, combine it with its parent
+                targetPath.TrimEnd('/');                      // clean sloppy user data
+                if ( ! targetPath.StartsWith("/") ) {         // if not an absolute path, then append to parent target path
                     var parentLayer = ctx.file.FindLayer(layer.parentIndex);
                     if ( parentLayer != null ) {
-                        targetPath = parentLayer.targetPath.TrimEnd('/') + "/" + path;
+                        targetPath = parentLayer.targetPath.TrimEnd('/') + "/" + targetPath;
                     } else {
                         Debug.LogWarning($"parent layer index {layer.parentIndex} not found");
                     }
@@ -390,7 +368,12 @@ namespace MetaSpritePlus {
             }
             layer.targetPath = targetPath;
 
-            if ( !ctx.targets.ContainsKey(targetPath) ) {
+            // data layers do not need to continue. i think.
+            if ( layer.actionName == "data" ) {
+                return targetPath;
+            }
+
+            if ( ! ctx.targets.ContainsKey(targetPath) ) {
                 var spriteName = targetPath.Replace('/', '.').Trim('.');
                 ctx.targets.Add(targetPath, new Target { path = targetPath, spriteName = spriteName });
             }
@@ -398,10 +381,10 @@ namespace MetaSpritePlus {
             // keep track of how many layers and pivots each target has.  warn if more than one pivot.
             var curTarget = ctx.targets[targetPath];
             if ( layer.type == LayerType.Meta && layer.actionName == "pivot" ) {
-                if ( curTarget.numPivots > 0 ) {
+                if ( curTarget.numPivotLayers > 0 ) {
                     Debug.LogWarning($"Pivot layer '{layer.layerName}' ignored because target '{targetPath}' already has a pivot");
                 } else {
-                    curTarget.numPivots++;
+                    curTarget.numPivotLayers++;
                 }
                 if ( curTarget.numLayers == 0 ) {
                     Debug.LogWarning($"Pivot layer '{layer.layerName}' with target '{targetPath}' has no content layers");
@@ -542,10 +525,10 @@ namespace MetaSpritePlus {
                             int texX = cel.x + x;
                             int texY = -(cel.y + y) + file.height - 1;
 
-                            var col = cel.GetPixelRaw(x, y);
-                            if ( col.a > 0.1f ) {
+                            var pixel = cel.GetPixelRaw(x, y);
+                            if ( pixel.a > 0.1f ) {
                                 center += new Vector2(texX, texY);
-                                ++pixelCount;
+                                pixelCount++;
                             }
                         }
                     }
@@ -567,16 +550,18 @@ namespace MetaSpritePlus {
         /**
          * STAGE 3 Helper
          * Calculate the difference, in pixels, of the parent pivot to the child pivot.  This will be used to transform the child target to the pivot's location.
+         * Because all pivots are stored in texture space, we don't need to calculate up the entire chain of pivots. Simply comparing the parent and child pivot
+         * is all that's needed.
          */
-        static List<OffsetFrame> CalcPivotOffsets(ImportContext ctx, List<PivotFrame> parentPivots, List<PivotFrame> targetPivots, string targetPath)
+        static Dictionary<int, Vector2> CalcPivotOffsets(ImportContext ctx, List<PivotFrame> parentPivots, List<PivotFrame> targetPivots, string targetPath)
         {
             string debugStr = "";
             debugStr += $"CalcPivotOffsets - {targetPath}\n";
-            var offsets = new List<OffsetFrame>();
+            var offsets = new Dictionary<int, Vector2>();
 
             if ( targetPivots == null ) {
                 debugStr += $" - exiting because no target pivots\n";
-                Debug.Log(debugStr);
+                Debug.LogWarning(debugStr);
                 return offsets;
             }
 
@@ -584,12 +569,13 @@ namespace MetaSpritePlus {
                 debugStr += $" - has {parentPivots.Count} parent pivots\n";
                 // for each frame, calculate difference between parent pivot and child pivot
                 targetPivots.ForEach(pivot => {
-                    OffsetFrame offset;
-                    int parentPivotIdx = parentPivots.FindIndex(item => item.frame == pivot.frame);
+                    Vector2 offset;
+                    int frameNum = pivot.frame;
+                    int parentPivotIdx = parentPivots.FindIndex(item => item.frame == frameNum);
                     if ( parentPivotIdx != -1 ) {
                         PivotFrame parentPivot = parentPivots[parentPivotIdx];
                         debugStr += $" - parent pivot index = {parentPivotIdx} coord: ({parentPivot.coord.x}, {parentPivot.coord.y})\n";
-                        offset = new OffsetFrame() { frame = pivot.frame, coord = pivot.coord - parentPivot.coord };
+                        offset = pivot.coord - parentPivot.coord;
                     } else {
                         debugStr += $" - no parent pivot index\n";
                         // If there is no parent pivot, then this pivot offset should be treated as (0,0).
@@ -597,17 +583,17 @@ namespace MetaSpritePlus {
                         // pivot is essentially the root.  The sprite will be drawn in relation to this pivot.
 
                         // BUT - This means the pivot should not move.  Doing so will actually move the sprite in the opposite direction.  Check.
-                        if ( pivot.frame > 0 ) {
-                            var prevPivot = targetPivots.Where(it => it.frame == pivot.frame-1).FirstOrDefault();
+                        if ( frameNum > 0 ) {
+                            var prevPivot = targetPivots.Where(it => it.frame == frameNum-1).FirstOrDefault();
                             if ( prevPivot != null && prevPivot.coord != pivot.coord ) {
-                                Debug.LogWarning($"Target '{targetPath}' has no parent pivots, but its pivot moves in frame {pivot.frame}.  This may cause unintented sprite movement.");
+                                Debug.LogWarning($"Target '{targetPath}' has no parent pivots, but its pivot moves in frame {frameNum}.  This may cause unintented sprite movement.");
                             }
                         }
 
-                        offset = new OffsetFrame() { frame = pivot.frame, coord = Vector2.zero };
+                        offset = Vector2.zero;
                     }
-                    debugStr += $"   frame: {offset.frame} offset: ({offset.coord.x}, {offset.coord.y})\n";
-                    offsets.Add(offset);
+                    debugStr += $"   frame: {frameNum} offset: ({offset.x}, {offset.y})\n";
+                    offsets.Add(frameNum, offset);
                 });
             } else {
                 debugStr += $" - using default pivot\n";
@@ -616,10 +602,11 @@ namespace MetaSpritePlus {
                 targetPivots.ForEach(pivot =>
                 {
                     // calculate default pivot position relative to the entire source texture. converts coordinate to pixel-space.
+                    int frameNum = pivot.frame;
                     var defaultPivotTex = Vector2.Scale(ctx.settings.PivotRelativePos, new Vector2(ctx.file.width, ctx.file.height));
-                    var offset = new OffsetFrame() { frame = pivot.frame, coord = pivot.coord - defaultPivotTex };
-                    debugStr += $"   frame: {offset.frame} default: ({defaultPivotTex.x}, {defaultPivotTex.y}) offset: ({offset.coord.x}, {offset.coord.y})\n";
-                    offsets.Add(offset);
+                    var offset = pivot.coord - defaultPivotTex;
+                    debugStr += $"   frame: {frameNum} default: ({defaultPivotTex.x}, {defaultPivotTex.y}) offset: ({offset.x}, {offset.y})\n";
+                    offsets.Add(frameNum, offset);
                 });
             }
 
@@ -646,8 +633,12 @@ namespace MetaSpritePlus {
                 var clipPath = fileNamePrefix + '_' + tag.name + ".anim";
                 AnimationClip clip = AssetDatabase.LoadAssetAtPath<AnimationClip>(clipPath);
 
+                if ( !ctx.animData.animations.ContainsKey(tag.name) ) {
+                    ctx.animData.animations.Add(tag.name, new Animation());
+                }
+
                 // Create clip
-                if (!clip) {
+                if ( !clip) {
                     clip = new AnimationClip();
                     AssetDatabase.CreateAsset(clip, clipPath);
                 } else {
@@ -693,6 +684,7 @@ namespace MetaSpritePlus {
 
             foreach ( var tag in ctx.file.frameTags ) {
                 debugStr += $"tag:'{tag.name}'\n";
+                string animName = tag.name;
                 AnimationClip clip = ctx.generatedClips[tag];
 
                 foreach ( KeyValuePair<string, Target> entry in ctx.targets ) {
@@ -702,8 +694,10 @@ namespace MetaSpritePlus {
                     var finalTarget = (spriteRootPath + targetPath).TrimStart('/');
 
                     debugStr += $"target: '{targetPath}' - sprite: '{spriteName}'\n";
+                    debugStr += $" - num pivots {target.pivots.Count} - num pivot norms {target.pivotNorms.Count}\n";
                     Sprite sprite = null;
-                    OffsetFrame offset = null;
+                    Vector2 offset = new Vector2();
+                    bool hasOffset = false;
                     float time;
                     int duration = 0;   // store accumulated duration of frames.  on each loop iteration will have the start time of the cur frame, in ms
                     var spriteKeyFrames = new List<ObjectReferenceKeyframe>();
@@ -716,10 +710,35 @@ namespace MetaSpritePlus {
                     //    - if previuos frame has no sprite, and this frame has no sprite, do nothing
                     //    - if previous frame has no sprite, and this frame has a sprite, then add a keyframe
                     bool didPrevFrameHaveSprite = false;
+                    PivotFrame pivot;
 
-                    for ( int i = tag.from; i <= tag.to; ++i ) {
+                    for ( int i = tag.from; i <= tag.to; i++ ) {
+                        int frameNum = i - tag.from;
                         sprite = frameSprites.Where(it => it.name == spriteName + "_" + i).FirstOrDefault();
                         if ( sprite != null ) {
+
+                            // only create animation data for this target if it's not empty
+                            if ( ! ctx.animData.animations[animName].targets.ContainsKey(targetPath) ) {
+                                ctx.animData.animations[animName].targets.Add(targetPath, new TargetData { path = targetPath, atlasId = spriteName });
+                            }
+
+                            // save animation data
+                            var spriteData = new SpriteData { frame = frameNum, width = 0, height = 0 };
+                            if ( target.pivotNorms.TryGetValue(i, out pivot) ) {
+                                spriteData.pivot = pivot.coord;
+                            } else {
+                                // do anything? use (0,0)?
+                                Debug.Log($"GenerateClipImageLayer() missing normalized target pivot coord. frame {i}, target: {target.path}");
+                            }
+
+                            if ( target.dimensions.TryGetValue(i, out var dimension) ) {
+                                spriteData.width  = dimension.width;
+                                spriteData.height = dimension.height;
+                            } else {
+                                Debug.Log($"GenerateClipImageLayer() missing sprite dimensions. frame {i}, target: {target.path}");
+                            }
+
+                            ctx.animData.animations[animName].targets[targetPath].sprites.Add(frameNum, spriteData);
                             debugStr += $"    {i} - sprite found with name '{sprite.name}'";
                         } else if ( didPrevFrameHaveSprite ) {
                             debugStr += $"    {i} - no sprite found for '{spriteName}_{i}'";
@@ -732,11 +751,12 @@ namespace MetaSpritePlus {
                             debugStr += $" - created sprite keyframe";
                         }
 
-                        offset = target.offsets.Where(it => it.frame == i).FirstOrDefault();
-                        if ( offset != null ) {
+                        // move the target according to its offset
+                        if ( target.offsets.TryGetValue(i, out offset) ) {
                             // infinity removes interpolation between frames, so change happens immediately when keyframe is reached
-                            tformXKeyFrames.Add(new Keyframe(time, offset.coord.x / ctx.settings.ppu, float.PositiveInfinity, float.PositiveInfinity));
-                            tformYKeyFrames.Add(new Keyframe(time, offset.coord.y / ctx.settings.ppu, float.PositiveInfinity, float.PositiveInfinity));
+                            hasOffset = true;
+                            tformXKeyFrames.Add(new Keyframe(time, offset.x / ctx.settings.ppu, float.PositiveInfinity, float.PositiveInfinity));
+                            tformYKeyFrames.Add(new Keyframe(time, offset.y / ctx.settings.ppu, float.PositiveInfinity, float.PositiveInfinity));
                         }
                         debugStr += $"\n";
 
@@ -744,6 +764,22 @@ namespace MetaSpritePlus {
                         duration += aseFrame.duration;
 
                         didPrevFrameHaveSprite = (sprite != null);
+
+                        // save any pivot data in data section
+                        if ( target.pivotNorms.TryGetValue(i, out pivot) ) {
+
+                            /** HERE **/
+
+                            // Debug.Log($"got pivot for {targetPath}");
+
+
+                            if ( !ctx.animData.animations[animName].targets.ContainsKey(targetPath) ) {
+                                ctx.animData.animations[animName].targets.Add(targetPath, new TargetData { path = targetPath });
+                            }
+                            var frameData = new FrameData { frame = frameNum };
+                            frameData.coords.Add(pivot.coord);
+                            ctx.animData.animations[animName].targets[targetPath].data.Add($"pivot::{frameNum}", frameData);
+                        }
                     }
 
                     time = duration * 0.001f - 1.0f / clip.frameRate;   // clip duration in seconds, minus one frame's time
@@ -753,9 +789,9 @@ namespace MetaSpritePlus {
                         spriteKeyFrames.Add(new ObjectReferenceKeyframe { time = time, value = sprite });
                     }
 
-                    if ( offset != null ) {
-                        tformXKeyFrames.Add(new Keyframe(time, offset.coord.x / ctx.settings.ppu, float.PositiveInfinity, float.PositiveInfinity));
-                        tformYKeyFrames.Add(new Keyframe(time, offset.coord.y / ctx.settings.ppu, float.PositiveInfinity, float.PositiveInfinity));
+                    if ( hasOffset ) {
+                        tformXKeyFrames.Add(new Keyframe(time, offset.x / ctx.settings.ppu, float.PositiveInfinity, float.PositiveInfinity));
+                        tformYKeyFrames.Add(new Keyframe(time, offset.y / ctx.settings.ppu, float.PositiveInfinity, float.PositiveInfinity));
                     }
 
                     // only save sprite keyframes if they exist
@@ -782,7 +818,7 @@ namespace MetaSpritePlus {
                 };
             }
 
-            //Debug.Log(debugStr);
+            Debug.Log(debugStr);
         }
 
 
