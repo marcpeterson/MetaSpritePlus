@@ -11,29 +11,27 @@ using GenericToDataString;  // for object dumper
  * Since multiple tags can deliminate different animations in the same file, we save data for each animation.
  * Data will be saved in a ScriptingObject asset file with the same name as the base name in the Aesprite Import config.
  *   AnimData : ScriptableObject {
- *     ppu                                  : currently needed to compensate for sprite flipping (calculates world-coordinates per pixel)
- *     animation<"anim name", Animation>    : AnimDictionary key is name of animation, such as "run e"
- *       numFrames,                         : number of frames in this animation
- *       targets<"path", TargetData>        : TargetDictionary key is path to game object, such as "/body/top/l arm"
- *         path,                            : path to target's game object, such as "/body/top/l arm"
- *         atlasId,                         : base name of target in sprite atlas
- *         distance,                        : optional distance between all pivots. only filled if "prev pivot' found
- *         sprites<frame, SpriteData></frame>   : one entry per frame of animation
- *           frame,                             : frame number
- *           width,                             : width of sprite in pixels
- *           height,                            : height of sprite in pixels
- *           pivot                              : sprite's pivot, from 0-1 in relation to pixel width/height
- *         data<"data name::frame", FrameData   : Data key is name of data point. eg "l foot pos"
- *           frame,                             : frame number
- *           coords<Vector2>                    : list of coordinates
+ *     ppu                                     : currently needed to compensate for sprite flipping (calculates world-coordinates per pixel)
+ *     animation<"anim name", Animation>       : AnimDictionary key is name of animation, such as "run e"
+ *       numFrames,                            : number of frames in this animation
+ *       targets<"path", TargetData>           : TargetDictionary key is path to game object, such as "/body/top/l arm"
+ *         path,                               : path to target's game object, such as "/body/top/l arm"
+ *         atlasId,                            : base name of target in sprite atlas
+ *         distance,                           : optional distance between all pivots. only filled if "prev pivot' found
+ *         sprites<frame, SpriteData>          : one entry per frame of animation
+ *           frame,                              : frame number
+ *           width,                              : width of sprite in pixels
+ *           height,                             : height of sprite in pixels
+ *           pivot                               : sprite's pivot, from 0-1 in relation to pixel width/height
+ *         data<"data name::frame", FrameData> : Data key is name of data point. eg "l foot pos"
+ *           frame,                              : frame number
+ *           coords<Vector2>                     : list of coordinates
  *         
  *   
  * HINTS
  *  - Aesprite defaults the frist frame number at 1.  But you can change this to 0.  Either way, frames in framedata will be numbered
  *    from 0, so it's best to make Aesprite match.
  *  - If you import a file and the animation data file already exists, it will not be updated until you save the Unity project.
- * 
- *   
  */
 
 namespace MetaSpritePlus
