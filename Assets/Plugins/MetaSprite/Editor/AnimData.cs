@@ -1,6 +1,7 @@
 ﻿using UnityEngine;
 using System.Collections;
 using System.Collections.Generic;
+//using System.Diagnostics;   // for stacktrace
 using RotaryHeart.Lib.SerializableDictionary;
 
 using GenericToDataString;  // for object dumper
@@ -48,39 +49,42 @@ namespace MetaSpritePlus
     {
         public string path;                     // path to gameobject we will render to. use this for TargetDictionary key?
         public string atlasId;                  // base name of sprite in atlas for this target. must be appended by "_{frame num}" for an actual sprite.
-        [SerializeField] public Vector3 distance    = Vector3.zero;                 // will only be filled if data "prev pivot" found.  it's the sum of all pivot differences.
+        [SerializeField] public Vector3 distance         = Vector3.zero;            // will only be filled if data "prev pivot" found.  it's the sum of all pivot differences.
         [SerializeField] public SpriteDictionary sprites = new SpriteDictionary();  // indexed by frame number?
-        [SerializeField] public DataDictionary data = new DataDictionary();
+        [SerializeField] public DataDictionary data      = new DataDictionary();
+        [SerializeField] public CoordDictionary offsets  = new CoordDictionary();   // offset location, in pixels, of target pivot in relation to parent pivot
     }
 
+    
     [System.Serializable]
     public class FrameData
     {
-        [SerializeField] public int frame;
         [SerializeField] public List<Vector2> coords = new List<Vector2>();       // each frame may have more than one coordinate of data
     }
 
     [System.Serializable]
     public class SpriteData
     {
-        [SerializeField] public int frame;      // also key to SpriteDictionary?
         [SerializeField] public int width  = 0; // width of sprite in pixels
         [SerializeField] public int height = 0; // height of sprite in pixels
-        [SerializeField] public Vector2 pivot;  // sprite pivot (from 0 to 1)
+        [SerializeField] public Vector2 pivot;  // sprite pivot normalized (from 0 to 1)
     }
 
 
     [System.Serializable]
-    public class AnimDictionary : SerializableDictionaryBase<string, Animation> { }       // indexed by name of animation. eg: 'run e'
+    public class AnimDictionary : SerializableDictionaryBase<string, Animation> { }      // indexed by name of animation. eg: 'run e'
 
     [System.Serializable]
-    public class DataDictionary : SerializableDictionaryBase<string, FrameData> { }       // indexed by name of target and data point. eg: '/bot/l foot/base::l foot pos'. was FrameDictionary
+    public class DataDictionary : SerializableDictionaryBase<string, FrameData> { }      // indexed by name of data point and frame. eg: 'l foot pos::1'. was FrameDictionary
 
     [System.Serializable]
     public class TargetDictionary : SerializableDictionaryBase<string, TargetData> { }   // indexed by path to object?
     
     [System.Serializable]
     public class SpriteDictionary : SerializableDictionaryBase<int, SpriteData> { }      // indexed by frame of animation
+
+    [System.Serializable]
+    public class CoordDictionary : SerializableDictionaryBase<int, Vector2> { }          // indexed by frame of animation
 
 
     public class AnimData : ScriptableObject
@@ -97,12 +101,39 @@ namespace MetaSpritePlus
         }
 
 
+        public List<Vector2> DataCoords(string clipName, string targetName, string dataName, int frameNum)
+        {
+            List<Vector2> pxlCoords = FindAllData(clipName, targetName, dataName, frameNum);
+            List<Vector2> locCoords = new List<Vector2>();
+            if ( pxlCoords != null ) {
+                for ( int i=0; i<pxlCoords.Count; i++ ) {
+                    Vector2 coord = pxlCoords[i] / ppu;
+                    locCoords.Add(coord);
+                }
+            }
+            return locCoords;
+        }
+
+
+        public Vector2 GetSpriteDimensions(string clipName, string targetName, int frameNum)
+        {
+            if ( animations.TryGetValue(clipName, out Animation animation) ) {
+                if ( animation.targets.TryGetValue(targetName, out TargetData targetData) ) {
+                    if ( targetData.sprites.TryGetValue(frameNum, out SpriteData spriteData) ) {
+                        return new Vector2(spriteData.width, spriteData.height);
+                    }
+                }
+            }
+            return Vector2.zero;
+        }
+
+
         /**
          * finds the first point for the animation and data name.  Or null.
          */
-        public Vector2? FindFirstDataCoord(string clipName, string dataName, int frame)
+        public Vector2? FindFirstDataCoord(string clipName, string targetName, string dataName, int frame)
         {
-            List<Vector2> coords = FindAllData(clipName, dataName, frame);
+            List<Vector2> coords = FindAllData(clipName, targetName, dataName, frame);
             if ( coords != null ) {
                 return coords[0];
             }
@@ -112,25 +143,36 @@ namespace MetaSpritePlus
 
 
         /**
-         * Gets all the data for the specified animation
+         * Gets all the data for the specified animation and target
          */
-        public List<Vector2> FindAllData(string clipName, string dataName, int frame)
+        public List<Vector2> FindAllData(string clipName, string targetName, string dataName, int frameNum)
         {
-            if ( animations.TryGetValue(clipName, out Animation animList) ) {
-
-                Debug.Log("FindAllData() migration incomplete");
-
-                /*
-                if ( animList.frameDict.TryGetValue(dataName, out FrameDataList frameDataList) ) {
-                    FrameData frameData = frameDataList.frames.Find(x => (x.frame == frame));
-                    if ( frameData != null ) {
-                        return frameData.coords;
+            if ( animations.TryGetValue(clipName, out Animation animation) ) {
+                if ( animation.targets.TryGetValue(targetName, out TargetData targetData) ) {
+                    if ( targetData.data.TryGetValue($"{dataName}::{frameNum}", out FrameData frameData) ) {
+                        if ( frameData != null ) {
+                            return frameData.coords;
+                        }
                     }
                 }
-                */
             }
 
             return null;
+        }
+
+        /**
+         * Temporary overload.
+         * TODO: find anything that uses this and include targetName
+         */
+        public List<Vector2> FindAllData(string clipName, string dataName, int frameNum)
+        {
+            var frame = new System.Diagnostics.StackFrame(1, true);
+            var method = frame.GetMethod();
+            var fileName = frame.GetFileName();
+            var lineNumber = frame.GetFileLineNumber();
+            Debug.LogWarning($"migrate {fileName}:{lineNumber} {method} use of FindAllData() to use target.");
+
+            return FindAllData(clipName, "/", dataName, frameNum);
         }
 
 
@@ -139,30 +181,32 @@ namespace MetaSpritePlus
          * Typically, this is the position of something in the last frame of one animation, 
          * and the position of that in the first frame of the next animation.
          */
-        public Vector3 dataCoordDiff(string clipFrom, string dataFrom, int frameFrom, bool flipFrom, string clipTo, string dataTo, int frameTo, bool flipTo, bool debug = false)
+        public Vector3 dataCoordDiff(string clipFrom, string targetFrom, string dataFrom, int frameFrom, bool flipFrom, string clipTo, string targetTo, string dataTo, int frameTo, bool flipTo, bool debug = false)
         {
-            Vector2? temp = FindFirstDataCoord(clipFrom, dataFrom, frameFrom);
+            Vector2? temp = FindFirstDataCoord(clipFrom, targetFrom, dataFrom, frameFrom);
             if ( temp == null ) {
                 Debug.LogWarning($"no coord for clip '{clipFrom}' data '{dataFrom}' at frame {frameFrom}");
                 return Vector3.zero;
             }
             Vector2 from = (Vector2) temp;
 
-            temp = FindFirstDataCoord(clipFrom, "dims", frameFrom);
+            Debug.Log("needs migration from dims to sprit data..."); /* TODO: fix */
+            temp = FindFirstDataCoord(clipFrom, targetFrom, "dims", frameFrom);
             if ( temp == null ) {
                 Debug.LogWarning($"no dimension found for clip '{clipFrom}' in animation data");
                 return Vector3.zero;
             }
             Vector2 fromDims = (Vector2) temp/ppu;
 
-            temp = FindFirstDataCoord(clipTo, dataTo, frameTo);
+            temp = FindFirstDataCoord(clipTo, targetTo, dataTo, frameTo);
             if ( temp == null ) {
                 Debug.LogWarning($"no coord for clip '{clipTo}' data '{dataTo}' at frame {frameTo}");
                 return Vector3.zero;
             }
             Vector2 to = (Vector2) temp;
 
-            temp = FindFirstDataCoord(clipTo, "dims", frameTo);
+            Debug.Log("needs migration from dims to sprit data..."); /* TODO: fix */
+            temp = FindFirstDataCoord(clipTo, targetTo, "dims", frameTo);
             if ( temp == null ) {
                 Debug.LogWarning($"no dimension found for clip '{clipTo}' in animation data");
                 return Vector3.zero;
@@ -191,6 +235,24 @@ namespace MetaSpritePlus
 
 
         /**
+         * Temporary overload.
+         * TODO: find anything that uses this and include targetName
+         */
+        public Vector3 dataCoordDiff(string clipFrom, string dataFrom, int frameFrom, bool flipFrom, string clipTo, string dataTo, int frameTo, bool flipTo, bool debug = false)
+        {
+            var frame = new System.Diagnostics.StackFrame(1, true);
+            var method = frame.GetMethod();
+            var fileName = frame.GetFileName();
+            var lineNumber = frame.GetFileLineNumber();
+
+            Debug.LogWarning($"migrate {fileName}:{lineNumber} {method} use of FindAllData() to use target.");
+
+            return dataCoordDiff(clipFrom, "/", dataFrom, frameFrom, flipFrom, clipTo, "/", dataTo, frameTo, flipTo, debug);
+        }
+
+
+
+        /**
          * Converts a coordinate from sprite-space to world-space.
          * 
          * Given the coord within the sprite, the sprite's dimensions, and the position of the sprite in worlds-space, converts the coordinate
@@ -201,7 +263,7 @@ namespace MetaSpritePlus
          * If bottom-left, then move the coordinate 1 pixel (1/ppu) in world space.  But only do so if the Pixel GameObject's pivot is in the bottom left, as
          * it is *not* being flipped, and is thus 1 pixel away from where it should be visibly placed.
          */
-        public Vector3 SpriteCoordToWorld(Vector2 coord, string clipName, int frame, Vector3? spriteWorldPos = null, bool flipX = false, bool popZ = false)
+        public Vector3 SpriteCoordToWorld(Vector2 coord, string clipName, string targetName, int frame, Vector3? spriteWorldPos = null, bool flipX = false, bool popZ = false)
         {
             // compensate for defaulting to null
             if ( spriteWorldPos == null ) {
@@ -209,7 +271,7 @@ namespace MetaSpritePlus
             }
 
             // get the sprite's dimensions
-            Vector2? temp = FindFirstDataCoord(clipName, "dims", frame);
+            Vector2? temp = FindFirstDataCoord(clipName, targetName, "dims", frame);
             if ( temp == null ) {
                 Debug.LogWarning($"no dimensions found for '{clipName}' in animation data");
                 return Vector2.zero;
@@ -240,7 +302,8 @@ namespace MetaSpritePlus
         public Vector3 GetPivotDiff(string clipName, int frame, bool flipX = false)
         {
             // get the sprite's dimensions
-            Vector2? temp = FindFirstDataCoord(clipName, "dims", frame);
+            Debug.LogWarning($"GetPivotDiff() needs migrating. Use root object location.");
+            Vector2? temp = FindFirstDataCoord(clipName, "/", "dims", frame);
             if ( temp == null ) {
                 Debug.LogWarning($"no dimensions found for '{clipName}' in animation data at frame {frame}");
                 return Vector2.zero;
@@ -248,7 +311,7 @@ namespace MetaSpritePlus
             Vector2 dims = (Vector2) temp/ppu;
 
             // previous pivot's coord is relative to the current pivot
-            temp = FindFirstDataCoord(clipName, "prev pivot", frame);
+            temp = FindFirstDataCoord(clipName, "/", "prev pivot", frame);
             if ( temp == null ) {
                 return Vector2.zero;
             }
@@ -270,7 +333,7 @@ namespace MetaSpritePlus
                 return animation.numFrames;
             }
 
-            Debug.LogWarning($"no frame count for '{clipName}' in animation data");
+            Debug.LogWarning($"No frame count for '{clipName}' in animation data");
             return 0;
         }
 

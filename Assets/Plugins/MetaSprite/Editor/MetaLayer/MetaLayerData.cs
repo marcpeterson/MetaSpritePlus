@@ -1,5 +1,3 @@
-
-
 using System.Collections.Generic;
 using System.Linq;
 using UnityEditor;
@@ -52,7 +50,7 @@ namespace MetaSpritePlus {
 
                 for ( int i = tag.from, j = 0; i <= tag.to; ++i, j++ ) {
                     int frameNum = i - tag.from;
-                    var frameData = new FrameData { frame = j, coords = new List<Vector2>() };
+                    var frameData = new FrameData { coords = new List<Vector2>() };
                     Cel cel;
                     file.frames[i].cels.TryGetValue(layer.index, out cel);
 
@@ -83,19 +81,21 @@ namespace MetaSpritePlus {
                                     // subtract pivot location to make coordinate relative to target's pivot
                                     coord -= pivotTex;
 
-                                    // default pixel origin is bottom left. center to the actual pixel by adding 0.5 in x and y directions
-                                    coord += new Vector2(0.5f, 0.5f);
-
+                                    /* this scales the position based on the layer's sprite's dimensions, if it has one.
+                                     * not sure it's useful anymore...
                                     // convert coordinate relative to target sprite's dimension
                                     // could also use ctx.animData.animations[animName].targets[layer.targetPath].sprites[frameNum]
                                     Dimensions dimensions;
                                     if ( target.dimensions.TryGetValue(frameNum, out dimensions) ) {
+                                        // default pixel origin is bottom left. center to the actual pixel by adding 0.5 in x and y directions
+                                        coord += new Vector2(0.5f, 0.5f); // NO!! saving pixel coordinates, not local/world coordinates
                                         coord = new Vector2(coord.x/dimensions.width, coord.y/dimensions.height);
                                     } else {
                                         // if target doesn't have dimensions, then it has no sprite. coordinate cannot be normalized based
                                         // on sprite's size. just store the pixel location.
                                         // Debug.Log($"@data layer '{layer.layerName}' has no sprite for frame {frameNum}");
                                     }
+                                    */
 
                                     /* TODO - calculate previous pivot cumulative distance
                                     // if calculating "prev pivot" data, and this is first pixel (should only be one), then store its distance

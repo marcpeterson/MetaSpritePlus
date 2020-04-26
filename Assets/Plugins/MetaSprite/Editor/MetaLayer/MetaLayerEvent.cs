@@ -41,6 +41,17 @@ namespace MetaSpritePlus {
 
                         // Debug.Log(paramType + ", " + layer.metaInfo.ParamCount);
 
+                        dynamic value = layer.GetParam(1);
+                        if ( value.GetType().Equals(typeof(string)) ) {
+                            evt.stringParameter = (string) value;
+                        } else if ( value.GetType().Equals(typeof(int)) ) {
+                            evt.intParameter = (int) value;
+                            evt.floatParameter = (float) value;
+                        } else if ( value.GetType().Equals(typeof(float)) ) {
+                            evt.floatParameter = (float) value;
+                        }
+
+                        /*
                         if (paramType == LayerParamType.String) {
                             evt.stringParameter = layer.GetParamString(1);
                         } else if (paramType == LayerParamType.Number) {
@@ -50,6 +61,7 @@ namespace MetaSpritePlus {
                                 evt.intParameter = (int) fval;
                             } 
                         }
+                        */
 
                         events.Add(evt);
                     }

@@ -29,6 +29,14 @@ namespace MetaSpritePlus {
 
         public List<Sprite> generatedSprites = new List<Sprite>();
 
+        /**
+         * @config() meta layer key/value data stored here.
+         * Since ImportSettings can be shared between multiple Aseprite files, this allows us to store config values specific to this file
+         * Currently used keys:
+         *   "animator-layer"   Name of the Animator Layer to save the clips to. By default all clips and states are saved on the default unity "Base Layer"
+         */
+        public Dictionary<string, dynamic> config = new Dictionary<string, dynamic>();
+
         // stored date about each sprite target
         public Dictionary<string, Target> targets = new Dictionary<string, Target>();
 
@@ -61,7 +69,7 @@ namespace MetaSpritePlus {
         public int pivotIndex = DEFAULT_PIVOT;  // the target's pivot layer
         public Dictionary<int, Vector2> pivots        = new Dictionary<int, Vector2>();    // pivots in texture space. in pixels.
         public Dictionary<int, Vector2> offsets       = new Dictionary<int, Vector2>();    // offset, in pixels, between this target's pivots and its parent's pivots. (0,0) if no parent pivots.
-        public Dictionary<int, Vector2> pivotNorms    = new Dictionary<int, Vector2>(); // pivots in sprite space. coordinate is 0-1 based on sprite dimensions.
+        public Dictionary<int, Vector2> pivotNorms    = new Dictionary<int, Vector2>();    // pivots in sprite space. coordinate is 0-1 based on sprite dimensions.
         public Dictionary<int, Dimensions> dimensions = new Dictionary<int, Dimensions>(); // dimensions of each animation frame, in pixels
         public int numPivotLayers = 0;          // only used for internal housekeeping and warn user if target has more than one pivot layer
         public int numLayers = 0;
@@ -74,47 +82,53 @@ namespace MetaSpritePlus {
 
         enum Stage {
             LoadFile,
+            GetConfigValues,
             CalculateTargets,
             CalculatePivots,
             GenerateAtlas,
             GenerateClips,
             GenerateController,
+            SaveOffsetsInAnimData,
             InvokeMetaLayerProcessor,
             SaveAnimData
         }
 
-	    // returns what percent of the stages have been processed
-        static float GetProgress(this Stage stage) {
+        // returns what percent of the stages have been processed
+        static float GetProgress(this Stage stage)
+        {
             return (float) (int) stage / Enum.GetValues(typeof(Stage)).Length;
         }
 
-        static string GetDisplayString(this Stage stage) {
+        static string GetDisplayString(this Stage stage)
+        {
             return stage.ToString();
         }
 
-        public static void Refresh() {
+        public static void Refresh()
+        {
             layerProcessors.Clear();
             var processorTypes = FindAllTypes(typeof(MetaLayerProcessor));
             // Debug.Log("Found " + processorTypes.Length + " layer processor(s).");
-            foreach (var type in processorTypes) {
-                if (type.IsAbstract) continue;
+            foreach ( var type in processorTypes ) {
+                if ( type.IsAbstract ) continue;
                 try {
                     var instance = (MetaLayerProcessor) type.GetConstructor(new Type[0]).Invoke(new object[0]);
-                    if (layerProcessors.ContainsKey(instance.actionName)) {
-                        Debug.LogError(string.Format("Duplicate processor with name {0}: {1}", instance.actionName, instance));
+                    if ( layerProcessors.ContainsKey(instance.actionName) ) {
+                        Debug.LogError($"Duplicate processor with name {instance.actionName}: {instance}");
                     } else {
                         layerProcessors.Add(instance.actionName, instance);
                     }
-                } catch (Exception ex) {
+                } catch ( Exception ex ) {
                     Debug.LogError("Can't instantiate meta processor " + type);
                     Debug.LogException(ex);
                 }
             }
         }
 
-	    // get all the type names in the passed interface
-	    // used to get all the child types derived from the base MetaLayerProcessor class
-        static Type[] FindAllTypes(Type interfaceType) {
+        // get all the type names in the passed interface
+        // used to get all the child types derived from the base MetaLayerProcessor class
+        static Type[] FindAllTypes(Type interfaceType)
+        {
             var types = System.Reflection.Assembly.GetExecutingAssembly()
                 .GetTypes();
             return types.Where(type => type.IsClass && interfaceType.IsAssignableFrom(type))
@@ -146,8 +160,8 @@ namespace MetaSpritePlus {
         }
 
 
-        public static void Import(DefaultAsset defaultAsset, ImportSettings settings) {
-
+        public static void Import(DefaultAsset defaultAsset, ImportSettings settings)
+        {
             var path = AssetDatabase.GetAssetPath(defaultAsset);
 
             var context = new ImportContext {
@@ -160,10 +174,12 @@ namespace MetaSpritePlus {
             };
 
             try {
-//                context.animData.data = new Dictionary<string, Dictionary<string, List<FrameData>>>();        // is this needed or legacy?
 
                 ImportStage(context, Stage.LoadFile);
                 LoadFile(context, settings, path);
+
+                ImportStage(context, Stage.GetConfigValues);
+                GetConfigValues(context);
 
                 ImportStage(context, Stage.CalculateTargets);
                 CalculateTargets(context);
@@ -183,24 +199,27 @@ namespace MetaSpritePlus {
                 ImportStage(context, Stage.GenerateController);
                 GenerateAnimController(context);
 
+                ImportStage(context, Stage.SaveOffsetsInAnimData);
+                SaveOffsetsInAnimData(context);
+
                 ImportStage(context, Stage.InvokeMetaLayerProcessor);
 
                 context.file.layers
-                    .Where(layer => layer.type == LayerType.Meta && layer.actionName != "pivot" )   // pivots are handled earlier
+                    .Where(layer => layer.type == LayerType.Meta && layer.actionName != "config" && layer.actionName != "pivot")   // config and pivots are handled earlier
                     .Select(layer => {
                         MetaLayerProcessor processor;
                         layerProcessors.TryGetValue(layer.actionName, out processor);
-                        return new LayerAndProcessor { layer = layer, processor = processor };                     
+                        return new LayerAndProcessor { layer = layer, processor = processor };
                     })
                     .OrderBy(it => it.processor != null ? it.processor.executionOrder : 0)
                     .ToList()
                     .ForEach(it => {
                         var layer = it.layer;
                         var processor = it.processor;
-                        if (processor != null) {
+                        if ( processor != null ) {
                             processor.Process(context, layer);
                         } else {
-                            Debug.LogWarning(string.Format("No processor for meta layer {0}", layer.layerName));                        
+                            Debug.LogWarning($"No processor for meta layer {layer.layerName}");
                         }
                     });
 
@@ -241,19 +260,21 @@ namespace MetaSpritePlus {
                 }
 
 
-            } catch (Exception e) {
+            } catch ( Exception e ) {
                 Debug.LogException(e);
             }
 
             ImportEnd(context);
         }
 
-	    // updates the UI progress bar
-        static void ImportStage(ImportContext ctx, Stage stage) {
+        // updates the UI progress bar
+        static void ImportStage(ImportContext ctx, Stage stage)
+        {
             EditorUtility.DisplayProgressBar("Importing " + ctx.fileName, stage.GetDisplayString(), stage.GetProgress());
         }
 
-        static void ImportEnd(ImportContext ctx) {
+        static void ImportEnd(ImportContext ctx)
+        {
             EditorUtility.ClearProgressBar();
         }
 
@@ -282,7 +303,25 @@ namespace MetaSpritePlus {
 
 
         /**
-         * STAGE 2 - Calculate the target for each layer.
+         * STAGE 2 - Look for any @config() layers and save their key/value pairs
+         */
+        public static void GetConfigValues(ImportContext ctx)
+        {
+            ctx.file.layers
+                .Where(layer => layer.type == LayerType.Meta && layer.actionName == "config")
+                .OrderBy(layer => layer.index)
+                .ToList()
+                .ForEach(layer =>
+                {
+                    string key = layer.GetParam(0);
+                    dynamic value = layer.GetParam(1);
+                    ctx.config.Add(key, value);
+                });
+        }
+
+
+        /**
+         * STAGE 3 - Calculate the target for each layer.
          * If a layer or group has parameters:
          *   - if it starts with "/", then it's an absolute path, just use it
          *   - otherwise it's a relative path, append to its parent path
@@ -306,7 +345,7 @@ namespace MetaSpritePlus {
 
             // now set up targets for pivot and data layers.  this is so we can warn users if a pivot target doesn't have any content layers.
             ctx.file.layers
-                .Where(layer => layer.type == LayerType.Meta && ( layer.actionName == "pivot" || layer.actionName == "data") )
+                .Where(layer => layer.type == LayerType.Meta && (layer.actionName == "pivot" || layer.actionName == "data"))
                 .OrderBy(layer => layer.index)
                 .ToList()
                 .ForEach(layer =>
@@ -384,7 +423,7 @@ namespace MetaSpritePlus {
 
 
         /**
-         * STAGE 3
+         * STAGE 4
          * Calculates the pivots and offets for each layer/group target.
          */
         public static void CalculatePivots(ImportContext ctx)
@@ -489,7 +528,7 @@ namespace MetaSpritePlus {
 
 
         /**
-         * STAGE 3 Helper
+         * STAGE 4 Helper
          * Returns a list of frames, and the pivot on each frame.  Note the pivot is in pixel coordinates
          */
         public static Dictionary<int, Vector2> CalcPivotsForAllFrames(ImportContext ctx, Layer pivotLayer)
@@ -532,9 +571,9 @@ namespace MetaSpritePlus {
             return pivots;
         }
 
-        
+
         /**
-         * STAGE 3 Helper
+         * STAGE 4 Helper
          * Calculate the difference, in pixels, of the parent pivot to the child pivot.  This will be used to transform the child target to the pivot's location.
          * Because all pivots are stored in texture space, we don't need to calculate up the entire chain of pivots. Simply comparing the parent and child pivot
          * is all that's needed.
@@ -554,7 +593,7 @@ namespace MetaSpritePlus {
             if ( parentPivots != null && parentPivots.Count > 0 ) {
                 debugStr += $" - has {parentPivots.Count} parent pivots\n";
                 // for each frame, calculate difference between parent pivot and child pivot
-                foreach ( var item in targetPivots) {
+                foreach ( var item in targetPivots ) {
                     Vector2 offset;
                     int frameNum  = item.Key;
                     Vector2 pivot = item.Value;
@@ -610,20 +649,21 @@ namespace MetaSpritePlus {
 
 
         /**
-         * STAGE 4 - Generate atlas happens in parent method
+         * STAGE 5 - Generate atlas happens in parent method
          */
-        
+
 
         /**
-         * STAGE 5 - Generate animation clips
+         * STAGE 6 - Generate animation clips
          * Each tag will get it's own animation clip.
          */
-        static void GenerateAnimClips(ImportContext ctx) {
-            Directory.CreateDirectory(ctx.animClipDirectory);       
-            var fileNamePrefix = ctx.animClipDirectory + '/' + ctx.settings.baseName; 
+        static void GenerateAnimClips(ImportContext ctx)
+        {
+            Directory.CreateDirectory(ctx.animClipDirectory);
+            var fileNamePrefix = ctx.animClipDirectory + '/' + ctx.settings.baseName;
 
             // Generate one animation for each tag
-            foreach (var tag in ctx.file.frameTags) {
+            foreach ( var tag in ctx.file.frameTags ) {
                 var clipPath = fileNamePrefix + '_' + tag.name + ".anim";
                 AnimationClip clip = AssetDatabase.LoadAssetAtPath<AnimationClip>(clipPath);
 
@@ -632,7 +672,7 @@ namespace MetaSpritePlus {
                 }
 
                 // Create clip
-                if ( !clip) {
+                if ( !clip ) {
                     clip = new AnimationClip();
                     AssetDatabase.CreateAsset(clip, clipPath);
                 } else {
@@ -643,7 +683,7 @@ namespace MetaSpritePlus {
                 // Set loop property
                 var loop = tag.properties.Contains("loop");
                 var settings = AnimationUtility.GetAnimationClipSettings(clip);
-                if (loop) {
+                if ( loop ) {
                     clip.wrapMode = WrapMode.Loop;
                     settings.loopBlend = true;
                     settings.loopTime = true;
@@ -664,7 +704,7 @@ namespace MetaSpritePlus {
 
 
         /**
-         * STAGE 5B
+         * STAGE 6B
          * For each target, set the sprite for each frame in the animation clip.
          */
         public static void GenerateClipImageLayer(ImportContext ctx, string spriteRootPath, List<Sprite> frameSprites)
@@ -697,7 +737,7 @@ namespace MetaSpritePlus {
                     var spriteKeyFrames = new List<ObjectReferenceKeyframe>();
                     var tformXKeyFrames = new List<Keyframe>();
                     var tformYKeyFrames = new List<Keyframe>();
-                    
+
                     //  set a variable to indicate if previous frame had a sprite.
                     //    - if previous frame has sprite, and this frame has a sprite, then add a keyframe
                     //    - if previous frame has sprite, and this frame doesn't, enter empty keyframe
@@ -717,7 +757,7 @@ namespace MetaSpritePlus {
                             }
 
                             // save animation data
-                            var spriteData = new SpriteData { frame = frameNum, width = 0, height = 0 };
+                            var spriteData = new SpriteData { width = 0, height = 0 };
                             if ( target.pivotNorms.TryGetValue(i, out pivot) ) {
                                 spriteData.pivot = pivot;
                             } else {
@@ -758,22 +798,6 @@ namespace MetaSpritePlus {
                         duration += aseFrame.duration;
 
                         didPrevFrameHaveSprite = (sprite != null);
-
-                        // save any pivot data in data section
-                        if ( target.pivotNorms.TryGetValue(i, out pivot) ) {
-
-                            /** HERE **/
-
-                            // Debug.Log($"got pivot for {targetPath}");
-
-
-                            if ( !ctx.animData.animations[animName].targets.ContainsKey(targetPath) ) {
-                                ctx.animData.animations[animName].targets.Add(targetPath, new TargetData { path = targetPath });
-                            }
-                            var frameData = new FrameData { frame = frameNum };
-                            frameData.coords.Add(pivot);
-                            ctx.animData.animations[animName].targets[targetPath].data.Add($"pivot::{frameNum}", frameData);
-                        }
                     }
 
                     time = duration * 0.001f - 1.0f / clip.frameRate;   // clip duration in seconds, minus one frame's time
@@ -812,61 +836,127 @@ namespace MetaSpritePlus {
                 };
             }
 
-            Debug.Log(debugStr);
+//            Debug.Log(debugStr);
         }
 
 
         /**
-         * STAGE 6
+         * STAGE 7
          * Create the animation controller
          */
-        static void GenerateAnimController(ImportContext ctx) {
-            if (ctx.animControllerPath == null) {
+        static void GenerateAnimController(ImportContext ctx)
+        {
+            if ( ctx.animControllerPath == null ) {
                 Debug.LogWarning("No animator controller specified. Controller generation will be ignored");
                 return;
             }
 
             var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(ctx.animControllerPath);
-            if ( ! controller ) {
+            if ( !controller ) {
                 controller = AnimatorController.CreateAnimatorControllerAtPath(ctx.animControllerPath);
             }
 
-            var layer = controller.layers[0];
+            AnimatorControllerLayer layer;
+            UnityEditor.Animations.AnimatorControllerLayer[] layers = controller.layers;
+
+            bool found = false;
+            if ( ctx.config.ContainsKey("animator-layer") ) {
+                string layerName = ctx.config["animator-layer"];
+                layer = new AnimatorControllerLayer();
+                for ( int i=0; i<layers.Length; i++ ) {
+                    if ( layers[i].name == layerName ) {
+                        layer = controller.layers[i];
+                        found = true;
+                        break;
+                    }
+                }
+
+                if ( !found ) {
+                    layer.name = layerName;
+                    layer.stateMachine = new UnityEditor.Animations.AnimatorStateMachine();
+                    controller.AddLayer(layer);
+                }
+            } else {
+                // otherwise just use the default layer
+                layer = controller.layers[0];
+            }
+
             var stateMap = new Dictionary<string, AnimatorState>();
             PopulateStateTable(stateMap, layer.stateMachine);
-            
-            foreach (var pair in ctx.generatedClips) {
+
+            foreach ( var pair in ctx.generatedClips ) {
                 var frameTag = pair.Key;
                 var clip = pair.Value;
 
-                AnimatorState st;
-                stateMap.TryGetValue(frameTag.name, out st);
-                if (!st) {
-                    st = layer.stateMachine.AddState(frameTag.name);
+                AnimatorState animatorState;
+                stateMap.TryGetValue(frameTag.name, out animatorState);
+                if ( ! animatorState ) {
+                    animatorState = layer.stateMachine.AddState(frameTag.name);
                 }
 
-                st.motion = clip;
+                animatorState.motion = clip;
             }
 
             EditorUtility.SetDirty(controller);
         }
 
 
-        static void PopulateStateTable(Dictionary<string, AnimatorState> table, AnimatorStateMachine machine) {
-            foreach (var state in machine.states) {
+        /**
+         * STAGE 7 Helper
+         * Create the state machine for the animation controller
+         */
+        static void PopulateStateTable(Dictionary<string, AnimatorState> table, AnimatorStateMachine machine)
+        {
+            foreach ( var state in machine.states ) {
                 var name = state.state.name;
-                if (table.ContainsKey(name)) {
+                if ( table.ContainsKey(name) ) {
                     Debug.LogWarning("Duplicate state with name " + name + " in animator controller. Behaviour is undefined.");
                 } else {
                     table.Add(name, state.state);
                 }
             }
 
-            foreach (var subMachine in machine.stateMachines) {
+            foreach ( var subMachine in machine.stateMachines ) {
                 PopulateStateTable(table, subMachine.stateMachine);
             }
         }
 
-    }
 
+        /**
+         * STAGE 8
+         * TODO: evaluate if this is actually useful
+         * Move offset data into the local animation data object so it will be saved to file.
+         */
+        static void SaveOffsetsInAnimData(ImportContext ctx)
+        {
+
+            foreach ( var tag in ctx.file.frameTags ) {
+                string animName = tag.name;
+                AnimationClip clip = ctx.generatedClips[tag];
+
+                foreach ( KeyValuePair<string, Target> entry in ctx.targets ) {
+                    var target = entry.Value;
+                    var targetPath = target.path;
+                    var spriteName = target.spriteName;
+
+                    for ( int i = tag.from; i <= tag.to; i++ ) {
+                        int frameNum = i - tag.from;
+
+                        // save any offset data in data section
+                        Vector2 coord;
+
+                        // if the target has texture (pixel) coordinates for pivot data, save it
+                        // note, a target can have texture pivots and not normalized pivots if it doesn't have a sprite.
+                        // normalized pivots are already saved in the target's sprite data.
+                        if ( target.offsets.TryGetValue(i, out coord) ) {
+                            if ( !ctx.animData.animations[animName].targets.ContainsKey(targetPath) ) {
+                                ctx.animData.animations[animName].targets.Add(targetPath, new TargetData { path = targetPath });
+                            }
+                            ctx.animData.animations[animName].targets[targetPath].offsets.Add(frameNum, coord);
+                        }
+                    }
+                }
+            }
+        }
+    }
 }

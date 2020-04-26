@@ -321,7 +321,7 @@ namespace MetaSpritePlus.Internal {
             public Color GetPixel(int x, int y) {
                 int idx = y * width + x;
                 if (idx < 0 || idx >= data.Length) {
-                    throw new Exception(string.Format("Pixel read of range! x: {0}, y: {1} where w: {2}, h: {3}", x, y, width, height));
+                    throw new Exception($"Pixel read of range! x: {x}, y: {y} where w: {width}, h: {height}");
                 }
                 return data[idx];
             }

@@ -92,6 +92,13 @@ namespace MetaSpritePlus {
             }
         }
 
+        public dynamic GetParam(int index) {
+            if ( parameters.Count <= index ) {
+                throw new Exception("No parameter #" + index);
+            }
+            return parameters[index].value;
+        }
+
         public int GetParamInt(int index) {
             return (int) CheckParamType(index, LayerParamType.Number).numberValue;
         }
@@ -139,12 +146,15 @@ namespace MetaSpritePlus {
         Meta    = 2
     }
 
+    // TODO: get rid of this and use dynamic type
     public enum LayerParamType {
         None, String, Number, Bool
     }
 
+    // TOOD: potentially migrate everything dynamic, get rid of LayerParam completely. Just use List<string, dynamic>
     public class LayerParam {
         public LayerParamType type;
+        public dynamic value;
         public double numberValue;
         public string stringValue;
         public bool boolValue;
@@ -611,19 +621,22 @@ namespace MetaSpritePlus {
                 if (lexer.Token == TKN_STRING) {
                     var param = new LayerParam();
                     param.type = LayerParamType.String;
-                    param.stringValue = lexer.TokenContents.Substring(1, lexer.TokenContents.Length - 2);
+                    param.stringValue = lexer.TokenContents.Substring(1, lexer.TokenContents.Length - 2);   // TODO: remove
+                    param.value = param.stringValue;
                     layer.parameters.Add(param);
                     isParam = true;
                 } else if (lexer.Token == TKN_NUMBER) {
                     var param = new LayerParam();
                     param.type = LayerParamType.Number;
-                    param.numberValue = double.Parse(lexer.TokenContents);
+                    param.numberValue = double.Parse(lexer.TokenContents);   // TODO: remove
+                    param.value = param.numberValue;
                     layer.parameters.Add(param);
                     isParam = true;
                 } else if (lexer.Token == TKN_BOOL) {
                     var param = new LayerParam();
                     param.type = LayerParamType.Bool;
-                    param.boolValue = bool.Parse(lexer.TokenContents);
+                    param.boolValue = bool.Parse(lexer.TokenContents);   // TODO: remove
+                    param.value = param.boolValue;
                     layer.parameters.Add(param);
                     isParam = true;
                 } else if (lexer.Token == TKN_RIGHT) {
