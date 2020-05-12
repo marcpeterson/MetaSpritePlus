@@ -79,7 +79,7 @@ namespace MetaSpritePlus.Internal {
                 // get pivot coordinates in relation to sprite's position in final texture
                 pivotTex -= cropPos;
 
-                // default pixel origin is bottom left. center to the actual pixel by adding 0.5 in x and y directions
+                // a pixel's location in the texture is its bottom-left corner. center to the actual pixel by adding 0.5 in x and y directions
                 pivotTex += new Vector2(0.5f, 0.5f);
 
                 // now translate pivot's sprite/frame location as a percentage of its dimensions (1x1)

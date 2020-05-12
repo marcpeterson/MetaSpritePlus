@@ -18,7 +18,7 @@ namespace MetaSpritePlus {
     [CreateAssetMenu(menuName = "ASE Import Settings")]
     public class ImportSettings : ScriptableObject {
 
-        public int ppu = 32;
+        public int ppu = 100;
 
         public SpriteAlignment alignment;
 
@@ -26,9 +26,9 @@ namespace MetaSpritePlus {
 
         public bool densePacked = true;
 
-        public int border = 3;
+        public int border = 1;
 
-        public string baseName = ""; // If left empty, use .ase file name
+        public string baseName = ""; // If left empty, use Aseprite source file name
 
         public string spriteRootPath = "";
 
@@ -41,6 +41,10 @@ namespace MetaSpritePlus {
         public string animControllerOutputPath;
 
         public string dataOutputDirectory = "";
+
+        public bool createEventForEachFrame = false;
+
+        public string eventFunctionName = "OnFrame";
 
         public Vector2 PivotRelativePos {
             get {
@@ -106,7 +110,15 @@ namespace MetaSpritePlus {
 
             settings.dataOutputDirectory = PathSelection("Anim Data Directory", settings.dataOutputDirectory);
 
-            if (EditorGUI.EndChangeCheck()) {
+            settings.createEventForEachFrame = EGL.Toggle("Create Event For Each Frame", settings.createEventForEachFrame);
+            if ( settings.createEventForEachFrame ) {
+                settings.eventFunctionName = EGL.TextField(new GUIContent("Call This Function",
+                    "Name of function on the GameObject where the Animator resides. This will be called with the frame number. Defaults to 'OnFrame'"),
+                    settings.eventFunctionName);
+            }
+
+
+            if ( EditorGUI.EndChangeCheck()) {
                 EditorUtility.SetDirty(settings);
             }
         }

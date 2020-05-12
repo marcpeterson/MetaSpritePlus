@@ -39,8 +39,6 @@ namespace MetaSpritePlus {
                             messageOptions = SendMessageOptions.DontRequireReceiver
                         };
 
-                        // Debug.Log(paramType + ", " + layer.metaInfo.ParamCount);
-
                         dynamic value = layer.GetParam(1);
                         if ( value.GetType().Equals(typeof(string)) ) {
                             evt.stringParameter = (string) value;
@@ -51,22 +49,10 @@ namespace MetaSpritePlus {
                             evt.floatParameter = (float) value;
                         }
 
-                        /*
-                        if (paramType == LayerParamType.String) {
-                            evt.stringParameter = layer.GetParamString(1);
-                        } else if (paramType == LayerParamType.Number) {
-                            var fval = layer.GetParamFloat(1);
-                            evt.floatParameter = fval;
-                            if (fval == Math.Floor(fval)) {
-                                evt.intParameter = (int) fval;
-                            } 
-                        }
-                        */
-
                         events.Add(evt);
                     }
 
-                    time += file.frames[f].duration * 1e-3f;
+                    time += file.frames[f].duration * 0.001f;   // aesprite time is in ms, convert to seconds
                 }
 
                 events.Sort((lhs, rhs) => lhs.time.CompareTo(rhs.time));

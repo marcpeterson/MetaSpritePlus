@@ -258,10 +258,7 @@ namespace MetaSpritePlus
          * Given the coord within the sprite, the sprite's dimensions, and the position of the sprite in worlds-space, converts the coordinate
          * to world space.  Can also pass the "flipX=true" boolean if the sprite is flipped on the x-axis.
          * 
-         * NOTE FOR DISPLAYING PIXELS
-         * A pixel's origin can either be its bottom-left, or center.  Center is preferred as it doesn't require compensation if the sprite is flipped.
-         * If bottom-left, then move the coordinate 1 pixel (1/ppu) in world space.  But only do so if the Pixel GameObject's pivot is in the bottom left, as
-         * it is *not* being flipped, and is thus 1 pixel away from where it should be visibly placed.
+         * A pixel origin is in its center so it doesn't require compensation if the sprite is flipped.
          */
         public Vector3 SpriteCoordToWorld(Vector2 coord, string clipName, string targetName, int frame, Vector3? spriteWorldPos = null, bool flipX = false, bool popZ = false)
         {
@@ -290,6 +287,7 @@ namespace MetaSpritePlus
             // the sprite's position should be where the sprite's pivot is.  the coordinate is originally placed in relation to this pivot's position in the sprite.
             worldPos += (Vector3) spriteWorldPos;
 
+            // NOTE: this is only helpful if sprites' depth is calculated based on z-position. Some may use y-position instead, making this less useful.
             if ( popZ ) {
                 worldPos.z = ((Vector3) spriteWorldPos).z - 0.01f;    // place in front of sprite
             }

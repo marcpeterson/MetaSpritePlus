@@ -48,8 +48,7 @@ namespace MetaSpritePlus {
                 Vector3 distance = Vector3.zero;
                 int numFrames = tag.to - tag.from + 1;
 
-                for ( int i = tag.from, j = 0; i <= tag.to; ++i, j++ ) {
-                    int frameNum = i - tag.from;
+                for ( int i = tag.from, frameNum = 0; i <= tag.to; i++, frameNum++ ) {
                     var frameData = new FrameData { coords = new List<Vector2>() };
                     Cel cel;
                     file.frames[i].cels.TryGetValue(layer.index, out cel);
@@ -66,7 +65,7 @@ namespace MetaSpritePlus {
                                 // store position of any visible pixels
                                 var pixel = cel.GetPixelRaw(x, y);
                                 if ( pixel.a > 0.1f ) {
-                                    // coordinate of the pixel on the original texture image (from bottom left corner)
+                                    // coordinate of the pixel on the original texture image (from bottom-left corner of texture)
                                     Vector2 coord = new Vector2(texX, texY);
 
                                     // get the target's pivot location on the original texture
@@ -87,8 +86,8 @@ namespace MetaSpritePlus {
                                     // could also use ctx.animData.animations[animName].targets[layer.targetPath].sprites[frameNum]
                                     Dimensions dimensions;
                                     if ( target.dimensions.TryGetValue(frameNum, out dimensions) ) {
-                                        // default pixel origin is bottom left. center to the actual pixel by adding 0.5 in x and y directions
-                                        coord += new Vector2(0.5f, 0.5f); // NO!! saving pixel coordinates, not local/world coordinates
+                                        // a pixel's location in the texture is its bottom-left corner. center to the actual pixel by adding 0.5 in x and y directions
+                                        coord += new Vector2(0.5f, 0.5f);
                                         coord = new Vector2(coord.x/dimensions.width, coord.y/dimensions.height);
                                     } else {
                                         // if target doesn't have dimensions, then it has no sprite. coordinate cannot be normalized based

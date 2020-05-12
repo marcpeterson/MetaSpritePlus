@@ -90,7 +90,8 @@ namespace MetaSpritePlus {
             GenerateController,
             SaveOffsetsInAnimData,
             InvokeMetaLayerProcessor,
-            SaveAnimData
+            SaveAnimData,
+            GenerateFrameEvents,
         }
 
         // returns what percent of the stages have been processed
@@ -234,12 +235,6 @@ namespace MetaSpritePlus {
                     }
                 }
 
-                // var importer = AssetImporter.GetAtPath(context.atlasPath) as TextureImporter;
-                // var spriteSheet = importer.spritesheet;
-                // Debug.Log("== SPRITESHEET ==");
-                // Debug.Log($"{spriteSheet[0].rect}");
-                // Debug.Log($"{spriteSheet[0].pivot}");
-
                 ImportStage(context, Stage.SaveAnimData);
                 var filePath = context.animDataDirectory + "/" + context.settings.baseName + " data.asset";
 
@@ -259,6 +254,11 @@ namespace MetaSpritePlus {
                     AssetDatabase.SaveAssets();
                 }
 
+                // add an animation event for every frame
+                if ( settings.createEventForEachFrame ) {
+                    ImportStage(context, Stage.GenerateFrameEvents);
+                    GenerateFrameEvents(context);
+                }
 
             } catch ( Exception e ) {
                 Debug.LogException(e);
@@ -677,7 +677,7 @@ namespace MetaSpritePlus {
                     AssetDatabase.CreateAsset(clip, clipPath);
                 } else {
                     clip.ClearCurves(); // clear existing clip curves and keyframes
-                    AnimationUtility.SetAnimationEvents(clip, new AnimationEvent[0]);
+                    AnimationUtility.SetAnimationEvents(clip, new AnimationEvent[0]);   // clear existing animation events
                 }
 
                 // Set loop property
@@ -838,8 +838,8 @@ namespace MetaSpritePlus {
 
 //            Debug.Log(debugStr);
         }
-
-
+        
+        
         /**
          * STAGE 7
          * Create the animation controller
@@ -958,5 +958,44 @@ namespace MetaSpritePlus {
                 }
             }
         }
+
+
+        /**
+         * STAGE 9
+         * Create an animation event on each keyframe that sets the frame number.
+         * Unity doesn't make it easy to extract, so it's better to say what frame we're on manually. If function is not named in settings, 
+         * then OnFrame("clip_name::frameNum") will be called.
+         */
+        public static void GenerateFrameEvents(ImportContext ctx)
+        {
+            var time = 0.0f;
+            foreach ( var tag in ctx.file.frameTags ) {
+                var clip = ctx.generatedClips[tag];
+                var events = new List<AnimationEvent>(clip.events);
+                string animName = tag.name;
+                var functionName = ctx.settings.eventFunctionName;
+
+                if ( functionName == "" ) {
+                    functionName = "OnFrame";
+                }
+
+                for ( int i = tag.from, frameNum = 0; i <= tag.to; i++, frameNum++ ) {
+                    var evt = new AnimationEvent
+                    {
+                        time = time,
+                        functionName = functionName,
+                        stringParameter = $"{animName}::{frameNum}",
+                        messageOptions = SendMessageOptions.DontRequireReceiver // tell unity not to complain if functionName doesn't yet exist
+                    };
+                    time += ctx.file.frames[i].duration * 0.001f;   // aesprite time is in ms, convert to seconds
+                    events.Add(evt);
+                }
+
+                events.Sort((lhs, rhs) => lhs.time.CompareTo(rhs.time));
+                AnimationUtility.SetAnimationEvents(clip, events.ToArray());
+                EditorUtility.SetDirty(clip);
+            }
+        }
+
     }
 }
