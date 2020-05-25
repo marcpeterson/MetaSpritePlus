@@ -99,6 +99,13 @@ namespace MetaSpritePlus {
             return parameters[index].value;
         }
 
+
+        /**
+         * TODO!!
+         * remove all of these...
+         */
+
+
         public int GetParamInt(int index) {
             return (int) CheckParamType(index, LayerParamType.Number).numberValue;
         }

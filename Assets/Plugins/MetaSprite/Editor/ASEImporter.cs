@@ -264,6 +264,7 @@ namespace MetaSpritePlus {
                 Debug.LogException(e);
             }
 
+            AssetDatabase.SaveAssets();
             ImportEnd(context);
         }
 
@@ -659,7 +660,6 @@ namespace MetaSpritePlus {
          */
         static void GenerateAnimClips(ImportContext ctx)
         {
-            Directory.CreateDirectory(ctx.animClipDirectory);
             var fileNamePrefix = ctx.animClipDirectory + '/' + ctx.settings.baseName;
 
             // Generate one animation for each tag
@@ -667,12 +667,12 @@ namespace MetaSpritePlus {
                 var clipPath = fileNamePrefix + '_' + tag.name + ".anim";
                 AnimationClip clip = AssetDatabase.LoadAssetAtPath<AnimationClip>(clipPath);
 
-                if ( !ctx.animData.animations.ContainsKey(tag.name) ) {
+                if ( ! ctx.animData.animations.ContainsKey(tag.name) ) {
                     ctx.animData.animations.Add(tag.name, new Animation());
                 }
 
                 // Create clip
-                if ( !clip ) {
+                if ( ! clip ) {
                     clip = new AnimationClip();
                     AssetDatabase.CreateAsset(clip, clipPath);
                 } else {
@@ -852,58 +852,97 @@ namespace MetaSpritePlus {
             }
 
             var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(ctx.animControllerPath);
-            if ( !controller ) {
+            if ( ! controller ) {
                 controller = AnimatorController.CreateAnimatorControllerAtPath(ctx.animControllerPath);
             }
 
-            AnimatorControllerLayer layer;
-            UnityEditor.Animations.AnimatorControllerLayer[] layers = controller.layers;
+            AnimatorControllerLayer layer = null;
+            AnimatorControllerLayer[] layers = controller.layers;
+
+            string debug = "Existing animator layers:\n";
+            for ( int i = 0; i<layers.Length; i++ ) {
+                debug += $" - layer {layers[i].name}\n";
+                for ( int n = 0; n < layers[i].stateMachine.states.Length; n++ ) {
+                    var state = layers[i].stateMachine.states[n];
+                    debug += $"   - State {state.state.name} id {state.state.nameHash}\n";
+                }
+            }
+
+            debug += $"\n\nRESULTS:\n";
 
             bool found = false;
             if ( ctx.config.ContainsKey("animator-layer") ) {
                 string layerName = ctx.config["animator-layer"];
-                layer = new AnimatorControllerLayer();
                 for ( int i=0; i<layers.Length; i++ ) {
                     if ( layers[i].name == layerName ) {
-                        layer = controller.layers[i];
+                        layer = layers[i];
                         found = true;
+                        debug += $"Found animator layer '{layerName}'\n";
                         break;
                     }
                 }
 
-                if ( !found ) {
+                if ( ! found ) {
+                    debug += $"Creating animator layer '{layerName}'\n";
+                    layer = new AnimatorControllerLayer();
                     layer.name = layerName;
-                    layer.stateMachine = new UnityEditor.Animations.AnimatorStateMachine();
-                    controller.AddLayer(layer);
                 }
             } else {
                 // otherwise just use the default layer
-                layer = controller.layers[0];
+                debug += $"Using default layer '{layers[0].name}'\n";
+                found = true;
+                layer = layers[0];
             }
 
-            var stateMap = new Dictionary<string, AnimatorState>();
-            PopulateStateTable(stateMap, layer.stateMachine);
+            if ( ! layer.stateMachine ) {
+                if ( found ) {
+                    // if we've found the layer in the controller, but it doesn't have a state machine, then something may be wrong
+                    Debug.LogWarning($"Animator layer '{layer.name}' had no state machine. Creating, but this could be sign of an error.");
+                }
+                layer.stateMachine = new AnimatorStateMachine();
+                layer.stateMachine.name = layer.name;
+                if ( AssetDatabase.GetAssetPath(layer.stateMachine).Length == 0 ) {
+                    debug += $"New state maching not in asset database. Adding...\n";
+                    AssetDatabase.AddObjectToAsset(layer.stateMachine, AssetDatabase.GetAssetPath(controller));
+                }
+            }
+
+            var stateTable = new Dictionary<string, AnimatorState>();
+            PopulateStateTable(stateTable, layer.stateMachine);
 
             foreach ( var pair in ctx.generatedClips ) {
                 var frameTag = pair.Key;
                 var clip = pair.Value;
 
                 AnimatorState animatorState;
-                stateMap.TryGetValue(frameTag.name, out animatorState);
+                stateTable.TryGetValue(frameTag.name, out animatorState);
                 if ( ! animatorState ) {
+                    debug += $"State '{frameTag.name}' not found. Adding.\n";
                     animatorState = layer.stateMachine.AddState(frameTag.name);
                 }
 
+                animatorState.name = frameTag.name;
                 animatorState.motion = clip;
+                if ( AssetDatabase.GetAssetPath(animatorState).Length == 0 ) {
+                    debug += $"New state not in asset database. Adding...\n";
+                    AssetDatabase.AddObjectToAsset(animatorState, AssetDatabase.GetAssetPath(layer.stateMachine));
+                }
             }
 
+            if ( ! found ) {
+                controller.AddLayer(layer);
+            }
+
+            // Debug.Log(debug);
+
             EditorUtility.SetDirty(controller);
+            AssetDatabase.SaveAssets();
         }
 
 
         /**
          * STAGE 7 Helper
-         * Create the state machine for the animation controller
+         * Extracts all the states from a state machine and any of its sub state machines.
          */
         static void PopulateStateTable(Dictionary<string, AnimatorState> table, AnimatorStateMachine machine)
         {
@@ -915,7 +954,7 @@ namespace MetaSpritePlus {
                     table.Add(name, state.state);
                 }
             }
-
+            
             foreach ( var subMachine in machine.stateMachines ) {
                 PopulateStateTable(table, subMachine.stateMachine);
             }
