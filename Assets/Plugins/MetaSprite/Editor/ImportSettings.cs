@@ -24,8 +24,6 @@ namespace MetaSpritePlus {
 
         public Vector2 defaultPivot;
 
-        public bool densePacked = true;
-
         public int border = 1;
 
         public string baseName = ""; // If left empty, use Aseprite source file name
@@ -92,8 +90,9 @@ namespace MetaSpritePlus {
                     "is the bottom-left of the sprite, and (1, 1) is the top-right of the sprite"), settings.defaultPivot);
             }
 
-            settings.densePacked = EGL.Toggle("Dense Pack", settings.densePacked);
-            settings.border = EGL.IntField("Border", settings.border);
+            settings.border = EGL.IntField(new GUIContent("Border", 
+                "How many empty pixels should surround each sprite?"),
+                settings.border);
 
             EGL.Space();
             using (new GL.HorizontalScope(EditorStyles.toolbar)) {

@@ -62,7 +62,7 @@ namespace MetaSpritePlus {
 
     public class Frame {
         public int duration;
-        public int frameID;
+        public int frameNum;
         public Dictionary<int, Cel> cels = new Dictionary<int, Cel>();
     }
 
@@ -257,7 +257,7 @@ namespace MetaSpritePlus {
 
                 for ( int i = 0; i < frameCount; ++i) {
                     var frame = new Frame();
-                    frame.frameID = i;
+                    frame.frameNum = i;
 
                     reader.ReadDWord(); // frameBytes
                     _CheckMagicNumber(reader.ReadWord(), 0xF1FA);

@@ -51,45 +51,51 @@ namespace MetaSpritePlus.Internal {
                 var pos = packResult.positions[i];
                 var image = images[i];
 
-                for ( int y = image.miny; y <= image.maxy; ++y ) {
-                    for ( int x = image.minx; x <= image.maxx; ++x ) {
-                        int texX = (x - image.minx) + pos.x;
-                        int texY = -(y - image.miny) + pos.y + image.finalHeight - 1;
+                for ( int y = 0; y < image.finalHeight; y++ ) {
+                    for ( int x = 0; x < image.finalWidth; x++ ) {
+                        int texX = pos.x + x;
+                        // source image (0,0) is top-left. unity texture (0,0) is bot-left. so convert between the two.
+                        int texY = pos.y - y + image.finalHeight - 1;
                         texture.SetPixel(texX, texY, image.GetPixel(x, y));
                     }
                 }
 
-                if ( ! ctx.targets.TryGetValue(image.target, out Target target) ) {
-                    Debug.LogError($"Could not find sprite name for target '{image.target}'");
-                    continue;
-                }
+                image.frameData.ForEach(frame =>
+                {
+                    if ( ! ctx.targets.TryGetValue(frame.targetPath, out Target target) ) {
+                        Debug.LogError($"Could not find sprite name for target '{frame.targetPath}'");
+                        return;
+                    }
 
-                // The metadata describes the sprite in Unity's terms
-                var metadata        = new SpriteMetaData();
-                metadata.name       = target.spriteName + "_" + image.frame;
-                metadata.alignment  = (int) SpriteAlignment.Custom;
-                metadata.rect       = new Rect(pos.x, pos.y, image.finalWidth, image.finalHeight);
+                    var metadata        = new SpriteMetaData();
+                    metadata.name       = target.spriteName + "_" + frame.frameNum;
+                    metadata.alignment  = (int) SpriteAlignment.Custom;
+                    metadata.rect       = new Rect(pos.x, pos.y, image.finalWidth, image.finalHeight);
 
-                Vector2 newPivotNorm;
-                Vector2 cropPos = new Vector2(image.minx, file.height - image.maxy - 1);
+                    Vector2 newPivotNorm;
 
-                // TODO: if no pivots, can we skip for this frame?
-                Vector2 pivotTex = ( target.pivots.ContainsKey(image.frame) ) ? target.pivots[image.frame] : Vector2.zero;
+                    // get crop position of original image in unity bot-left (0,0) texture space
+                    Vector2 cropPos = new Vector2(frame.offsetX, file.height - frame.offsetY - image.finalHeight);
 
-                // get pivot coordinates in relation to sprite's position in final texture
-                pivotTex -= cropPos;
+                    // TODO: if no pivots, can we skip for this frame?
+                    Vector2 pivotTex = ( target.pivots.ContainsKey(frame.frameNum) ) ? target.pivots[frame.frameNum] : Vector2.zero;
 
-                // a pixel's location in the texture is its bottom-left corner. center to the actual pixel by adding 0.5 in x and y directions
-                pivotTex += new Vector2(0.5f, 0.5f);
+                    // get pivot coordinates in relation to sprite's position in final texture
+                    pivotTex -= cropPos;
 
-                // now translate pivot's sprite/frame location as a percentage of its dimensions (1x1)
-                newPivotNorm =  Vector2.Scale(pivotTex, new Vector2(1.0f / image.finalWidth, 1.0f / image.finalHeight));
+                    // a pixel's location in the texture is its bottom-left corner. center to the actual pixel by adding 0.5 in x and y directions
+                    pivotTex += new Vector2(0.5f, 0.5f);
 
-                // save everything
-                target.pivotNorms.Add(image.frame, newPivotNorm);
-                target.dimensions.Add(image.frame, new Dimensions { frame = image.frame, width = image.finalWidth, height = image.finalHeight });
-                metadata.pivot = newPivotNorm;
-                metaList.Add(metadata);
+                    // now translate pivot's sprite/frame location as a percentage of its dimensions (1x1)
+                    newPivotNorm =  Vector2.Scale(pivotTex, new Vector2(1.0f / image.finalWidth, 1.0f / image.finalHeight));
+
+                    // save everything
+                    target.pivotNorms.Add(frame.frameNum, newPivotNorm);
+                    target.dimensions.Add(frame.frameNum, new Dimensions { frame = frame.frameNum, width = image.finalWidth, height = image.finalHeight });
+                    metadata.pivot = newPivotNorm;
+                    metaList.Add(metadata);
+                });
+
             }
 
             var bytes = texture.EncodeToPNG();
@@ -146,12 +152,28 @@ namespace MetaSpritePlus.Internal {
                         .OrderBy(it => it.layerIndex)
                         .ToList();
 
-                    var image = ExtractImage(ctx, cels);
+                    var image = ExtractImage(ctx, cels, targetPath, frame.frameNum);
+
                     if ( image.hasContent ) {
-                        image.target = targetPath;
-                        image.frame = frame.frameID;
-                        images.Add(image);
+                        // see if this image already exists
+                        bool exists = false;
+                        foreach ( var curImage in images ) {
+                            // first check the width and height
+                            if ( curImage.finalWidth == image.finalWidth && curImage.finalHeight == image.finalHeight ) {
+                                if ( curImage.Equals(image) ) {
+                                    Debug.Log($"Matched image {targetPath} frame {frame.frameNum} with image {curImage.frameData[0].targetPath} frame {curImage.frameData[0].frameNum}");
+                                    curImage.frameData.Add(image.frameData[0]);
+                                    exists = true;
+                                    break;
+                                }
+                            }
+                        }
+
+                        if ( ! exists ) {
+                            images.Add(image);
+                        }
                     }
+
                 });
             };
 
@@ -162,7 +184,7 @@ namespace MetaSpritePlus.Internal {
         /**
          * Generates a single image from all the cels (layers) passed to it.
          */
-        private static FrameImage ExtractImage(ImportContext ctx, List<Cel> cels)
+        private static FrameImage ExtractImage(ImportContext ctx, List<Cel> cels, string targetPath, int frameNum)
         {
             var file     = ctx.file;
             var settings = ctx.settings;
@@ -175,8 +197,7 @@ namespace MetaSpritePlus.Internal {
                         if ( c.a != 0f ) {
                             var x = cx + cel.x;
                             var y = cy + cel.y;
-                            if ( 0 <= x && x < file.width &&
-                                0 <= y && y < file.height ) { // Aseprite allows some pixels out of bounds to be kept, ignore them
+                            if ( 0 <= x && x < file.width && 0 <= y && y < file.height ) { // Aseprite allows some pixels out of bounds to be kept, ignore them
                                 var lastColor = image.GetPixel(x, y);
 
                                 // blending
@@ -204,17 +225,31 @@ namespace MetaSpritePlus.Internal {
                 image.minx = image.maxx = image.miny = image.maxy = 0;
             }
 
-            if ( !settings.densePacked ) {       // override image border for sparsely packed atlas
-                image.minx = image.miny = 0;
-                image.maxx = file.width - 1;
-                image.maxy = file.height - 1;
+            // trim unused space in image
+            var finalImage = new FrameImage(image.finalWidth, image.finalHeight);
+            for ( var y = 0; y<image.finalHeight; y++ ) {
+                for ( var x=0; x<image.finalWidth; x++ ) {
+                    finalImage.SetPixel(x, y, image.GetPixel(x+image.minx, y+image.miny));
+                }
             }
 
-            return image;
+            // save frame-specific data
+            finalImage.frameData.Add( new FrameImageData() {
+                frameNum = frameNum,
+                offsetX = image.minx,
+                offsetY = image.miny,
+                targetPath = targetPath,
+            });
+            finalImage.minx = 0;
+            finalImage.miny = 0;
+            finalImage.maxx = image.finalWidth - 1;
+            finalImage.maxy = image.finalHeight - 1;
+
+            return finalImage;
         }
 
 
-        /// Pack the atlas
+        // Pack the atlas
         static PackResult PackAtlas(List<PackData> list, int border) {
             int size = 128;
             while (true) {
@@ -268,6 +303,7 @@ namespace MetaSpritePlus.Internal {
             };
         }
 
+
         static List<Sprite> GetAtlasSprites(string path) {
             // Get frames of the atlas
             var frameSprites = new List<Sprite>(); 
@@ -284,14 +320,15 @@ namespace MetaSpritePlus.Internal {
                 .ToList();
         }
 
-        class FrameImage {
+
+        class FrameImage : IEquatable<FrameImage> {
 
             public bool hasContent = false; // used to skip empty frames
-            public int frame;
-            public string target;           // destination object to put sprite on
 
             public int minx = int.MaxValue, miny = int.MaxValue, 
                        maxx = int.MinValue, maxy = int.MinValue;
+
+            public List<FrameImageData> frameData = new List<FrameImageData>();
 
             public int finalWidth {
                 get {
@@ -331,6 +368,28 @@ namespace MetaSpritePlus.Internal {
                 hasContent = true;
             }
 
+            public bool Equals(FrameImage other)
+            {
+                for ( int i = 0; i < data.Length; ++i ) {
+                    if ( data[i] != other.data[i] ) {
+                        //Debug.Log($"Sprite differs at (" + i % finalWidth + ", " + (i/finalWidth) + ")");
+                        return false;
+                    }
+                }
+                return true;
+            }
+        }
+
+
+        /**
+         * Data structure to hold metadata of each image. This is so we can reuse images even if they have different metadata.
+         */
+        class FrameImageData
+        {
+            public int frameNum;    // animation frame that this data applies to
+            public int offsetX;     // original offset of image before trimmed of whitespace
+            public int offsetY;
+            public string targetPath;   // target path for this frame
         }
 
     }

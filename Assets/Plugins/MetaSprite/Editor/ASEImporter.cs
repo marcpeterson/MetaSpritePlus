@@ -530,7 +530,8 @@ namespace MetaSpritePlus {
 
         /**
          * STAGE 4 Helper
-         * Returns a list of frames, and the pivot on each frame.  Note the pivot is in pixel coordinates
+         * Returns a list of frames, and the pivot on each frame.  The pivot coordinates are in a bot-left origin (0,0) unity coordinate space,
+         * in an texture the same size as the original image (no clipping).
          */
         public static Dictionary<int, Vector2> CalcPivotsForAllFrames(ImportContext ctx, Layer pivotLayer)
         {
@@ -549,7 +550,7 @@ namespace MetaSpritePlus {
                         for ( int x = 0; x < cel.width; ++x ) {
                             // tex coords relative to full texture boundaries
                             int texX = cel.x + x;
-                            int texY = -(cel.y + y) + file.height - 1;
+                            int texY = -(cel.y + y) + file.height - 1;  // convert aseprite top-left (0,0) coord to unity texture bot-left (0,0) coord
 
                             var pixel = cel.GetPixelRaw(x, y);
                             if ( pixel.a > 0.1f ) {
@@ -988,7 +989,7 @@ namespace MetaSpritePlus {
                         // note, a target can have texture pivots and not normalized pivots if it doesn't have a sprite.
                         // normalized pivots are already saved in the target's sprite data.
                         if ( target.offsets.TryGetValue(i, out coord) ) {
-                            if ( !ctx.animData.animations[animName].targets.ContainsKey(targetPath) ) {
+                            if ( ! ctx.animData.animations[animName].targets.ContainsKey(targetPath) ) {
                                 ctx.animData.animations[animName].targets.Add(targetPath, new TargetData { path = targetPath });
                             }
                             ctx.animData.animations[animName].targets[targetPath].offsets.Add(frameNum, coord);
