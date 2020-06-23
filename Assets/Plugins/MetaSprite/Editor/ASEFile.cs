@@ -70,6 +70,7 @@ namespace MetaSpritePlus {
         public int index;                   // lower value = lower layer order = draws below higher index values
         public int parentIndex;             // -1 if level==0 (has no parent), otherwise the index of direct parent
         public int childLevel;              // nested depth of layer.  currently just used for debugging indentation...
+        public int? sortOrder = null;       // sprite sorting order in layer. only targets can have these. allows a target to go in front/behind other sprite parts.
         public bool visible;
         public BlendMode blendMode;
         public float opacity;
@@ -576,7 +577,7 @@ namespace MetaSpritePlus {
                 new TokenDefinition(@"([-+]?\d+\.\d+([eE][-+]?\d+)?)|([-+]?\d+)", TKN_NUMBER),
                 new TokenDefinition(@"(true)|(false)", TKN_BOOL),
                 new TokenDefinition(@"[a-zA-Z0-9_\- ]+", TKN_ID),    // added space
-                new TokenDefinition(@"\,", TKN_COMMA),
+                new TokenDefinition(@"\,[ ]*", TKN_COMMA),           // capture trailing space
                 new TokenDefinition(@"\(", TKN_LEFT),
                 new TokenDefinition(@"\)", TKN_RIGHT),
                 new TokenDefinition(@"\s*", TKN_SPACE),
@@ -614,7 +615,7 @@ namespace MetaSpritePlus {
                     }
                 }
             }
-
+            
             if (lexer.Token != TKN_LEFT) {
                 _ErrorUnexpected(lexer, TKN_LEFT);
             }

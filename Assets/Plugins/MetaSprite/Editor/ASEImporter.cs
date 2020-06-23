@@ -10,6 +10,7 @@ using GenericToDataString;  // for object dumper
 
 using MetaSpritePlus.Internal;
 using System.Linq;
+using UnityEngine.Rendering;
 
 namespace MetaSpritePlus {
 
@@ -71,6 +72,7 @@ namespace MetaSpritePlus {
         public Dictionary<int, Vector2> offsets       = new Dictionary<int, Vector2>();    // offset, in pixels, between this target's pivots and its parent's pivots. (0,0) if no parent pivots.
         public Dictionary<int, Vector2> pivotNorms    = new Dictionary<int, Vector2>();    // pivots in sprite space. coordinate is 0-1 based on sprite dimensions.
         public Dictionary<int, Dimensions> dimensions = new Dictionary<int, Dimensions>(); // dimensions of each animation frame, in pixels
+        public Dictionary<int, int?> sortOrder        = new Dictionary<int, int?>();       // the target's sprite sorting order
         public int numPivotLayers = 0;          // only used for internal housekeeping and warn user if target has more than one pivot layer
         public int numLayers = 0;
     }
@@ -364,31 +366,58 @@ namespace MetaSpritePlus {
             string targetPath = "";
 
             if ( layer.actionName == "data" && layer.parameters.Count > 1 ) {
-                // data layer requires a name. if 2 parameters, then 1st is a target
+                // data layer requires a name. if 2 parameters, then 1st is a target and 2nd is the data's name
                 targetPath = layer.GetParamString(0);
             } else if ( layer.actionName != "data" && layer.parameters.Count > 0 ) {
-                // target path should be the first (and only) parameter
+                // target path should be the 1st parameter
                 targetPath = layer.GetParamString(0);
             }
 
             if ( targetPath == "" ) {
                 // if layer/group has no target parameter, then it's not split.  target is its parent target.
                 var parentLayer = ctx.file.FindLayer(layer.parentIndex);
-                if ( layer.index == -1 ) {
-                    targetPath = layer.targetPath;
-                } else if ( parentLayer != null ) {
-                    targetPath = parentLayer.targetPath;
+                if ( layer.index == -1 ) {                       // if the root layer
+                    targetPath = layer.targetPath;               //   just use the layer targetPath. probably ""
+                } else if ( parentLayer != null ) {              // if there's a parent layer
+                    targetPath = parentLayer.targetPath;         //   use the parent's target path
+                    if ( layer.actionName != "data" ) {
+                        layer.sortOrder = parentLayer.sortOrder; //   use the parent's sort order
+                    }
                 } else {
                     Debug.LogWarning($"parent layer index {layer.parentIndex} not found");
                 }
             } else {
-                targetPath.TrimEnd('/');                      // clean sloppy user data
-                if ( ! targetPath.StartsWith("/") ) {         // if not an absolute path, then append to parent target path
+                // else if layer/group has a target parameter, then see if it's aboslute or relative
+                targetPath.TrimEnd('/');                        // clean sloppy user data
+                if ( ! targetPath.StartsWith("/") ) {           // if not an absolute path, then append to parent target path
                     var parentLayer = ctx.file.FindLayer(layer.parentIndex);
-                    if ( parentLayer != null ) {
+                    if ( parentLayer != null ) {                // relative path, combine with parent
                         targetPath = parentLayer.targetPath.TrimEnd('/') + "/" + targetPath;
                     } else {
                         Debug.LogWarning($"parent layer index {layer.parentIndex} not found");
+                    }
+                }
+
+                // optional 2nd parameter should be the sort order
+                if ( layer.actionName != "data" ) {
+                    if ( layer.parameters.Count > 1 ) {
+                        dynamic sortOrder = layer.GetParam(1);
+                        if ( sortOrder != null ) {
+                            if ( layer.GetParam(1).GetType() == typeof(System.Double) ) {
+                                layer.sortOrder = Convert.ToInt32(layer.GetParam(1));
+                            } else {
+                                Debug.LogWarning($"Target '{targetPath}' has non-numeric 2nd parameter '{layer.GetParam(1)}' of type {layer.GetParam(1).GetType()}");
+                            }
+                        }
+                    } else {
+                        // no sort order, so use parent's
+
+                        // TODO: test if this is working...
+
+                        var parentLayer = ctx.file.FindLayer(layer.parentIndex);
+                        if ( parentLayer != null ) {
+                            layer.sortOrder = parentLayer.sortOrder;
+                        }
                     }
                 }
             }
@@ -726,7 +755,7 @@ namespace MetaSpritePlus {
                     var target = entry.Value;
                     var targetPath = target.path;
                     var spriteName = target.spriteName;
-                    var finalTarget = (spriteRootPath + targetPath).TrimStart('/');
+                    var finalTarget = (spriteRootPath + targetPath).Trim('/');
 
                     debugStr += $"target: '{targetPath}' - sprite: '{spriteName}'\n";
                     debugStr += $" - num pivots {target.pivots.Count} - num pivot norms {target.pivotNorms.Count}\n";
@@ -738,6 +767,7 @@ namespace MetaSpritePlus {
                     var spriteKeyFrames = new List<ObjectReferenceKeyframe>();
                     var tformXKeyFrames = new List<Keyframe>();
                     var tformYKeyFrames = new List<Keyframe>();
+                    var sortOrderFrames = new List<Keyframe>();
 
                     //  set a variable to indicate if previous frame had a sprite.
                     //    - if previous frame has sprite, and this frame has a sprite, then add a keyframe
@@ -747,13 +777,15 @@ namespace MetaSpritePlus {
                     bool didPrevFrameHaveSprite = false;
                     Vector2 pivot;
 
+                    int? prevSortOrder = null;
                     for ( int i = tag.from; i <= tag.to; i++ ) {
                         int frameNum = i - tag.from;
+                        time = duration * 0.001f;   // aesprite time is in ms, convert to seconds
                         sprite = frameSprites.Where(it => it.name == spriteName + "_" + i).FirstOrDefault();
                         if ( sprite != null ) {
 
                             // only create animation data for this target if it's not empty
-                            if ( ! ctx.animData.animations[animName].targets.ContainsKey(targetPath) ) {
+                            if ( !ctx.animData.animations[animName].targets.ContainsKey(targetPath) ) {
                                 ctx.animData.animations[animName].targets.Add(targetPath, new TargetData { path = targetPath, atlasId = spriteName });
                             }
 
@@ -775,11 +807,21 @@ namespace MetaSpritePlus {
 
                             ctx.animData.animations[animName].targets[targetPath].sprites.Add(frameNum, spriteData);
                             debugStr += $"    {i} - sprite found with name '{sprite.name}'";
+
+                            // make keyframe for any change in the sort order
+                            if ( target.sortOrder.ContainsKey(frameNum) ) {
+                                int? sortOrder = target.sortOrder[frameNum];
+                                if ( sortOrder != null ) {
+                                    //Debug.Log($"'{target.path}' sortOrder {sortOrder} on frame {frameNum}");
+                                    if ( prevSortOrder != sortOrder ) {
+                                        sortOrderFrames.Add(new Keyframe(time, (float) sortOrder, float.PositiveInfinity, float.PositiveInfinity));
+                                        prevSortOrder = sortOrder;
+                                    }
+                                }
+                            }
                         } else if ( didPrevFrameHaveSprite ) {
                             debugStr += $"    {i} - no sprite found for '{spriteName}_{i}'";
                         }
-                        var aseFrame = ctx.file.frames[i];
-                        time = duration * 0.001f;   // aesprite time is in ms, convert to seconds
 
                         if ( didPrevFrameHaveSprite || sprite != null ) {
                             spriteKeyFrames.Add(new ObjectReferenceKeyframe { time = time, value = sprite });
@@ -796,10 +838,14 @@ namespace MetaSpritePlus {
                         debugStr += $"\n";
 
                         // add this frame's duration to calculate when the next frame starts
-                        duration += aseFrame.duration;
+                        duration += ctx.file.frames[i].duration;
 
                         didPrevFrameHaveSprite = (sprite != null);
                     }
+
+                    /**
+                     * Create any final keyframes
+                     */
 
                     time = duration * 0.001f - 1.0f / clip.frameRate;   // clip duration in seconds, minus one frame's time
 
@@ -834,10 +880,19 @@ namespace MetaSpritePlus {
                     } else if ( spriteKeyFrames.Count() > 0 ) {
                         debugStr += $" - final target '{finalTarget}' has no offsets\n";
                     }
-                };
+
+                    // only save sort orders keyframes if they exist
+                    if ( sortOrderFrames.Count > 0 ) {
+                        debugStr += ($" - final target '{finalTarget}' sort order keyframes: {sortOrderFrames.Count}\n");
+                        clip.SetCurve(finalTarget, typeof(SpriteRenderer), "m_SortingOrder", new AnimationCurve(sortOrderFrames.ToArray()));
+
+                        // NOTE: tried to set the Sorting Group -> Order in Layer property, but it isn't exposed (not even in the editor)
+                        //clip.SetCurve("parts", typeof(SortingGroup), "sortingOrder", new AnimationCurve(sortOrderFrames.ToArray()));
+                    }
+                }
             }
 
-//            Debug.Log(debugStr);
+            //Debug.Log(debugStr);
         }
         
         

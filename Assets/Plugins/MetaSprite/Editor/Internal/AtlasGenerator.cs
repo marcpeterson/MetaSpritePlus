@@ -60,25 +60,25 @@ namespace MetaSpritePlus.Internal {
                     }
                 }
 
-                image.frameData.ForEach(frame =>
+                image.frameInfo.ForEach(info =>
                 {
-                    if ( ! ctx.targets.TryGetValue(frame.targetPath, out Target target) ) {
-                        Debug.LogError($"Could not find sprite name for target '{frame.targetPath}'");
+                    if ( ! ctx.targets.TryGetValue(info.targetPath, out Target target) ) {
+                        Debug.LogError($"Could not find sprite name for target '{info.targetPath}'");
                         return;
                     }
 
                     var metadata        = new SpriteMetaData();
-                    metadata.name       = target.spriteName + "_" + frame.frameNum;
+                    metadata.name       = target.spriteName + "_" + info.frameNum;
                     metadata.alignment  = (int) SpriteAlignment.Custom;
                     metadata.rect       = new Rect(pos.x, pos.y, image.finalWidth, image.finalHeight);
 
                     Vector2 newPivotNorm;
 
                     // get crop position of original image in unity bot-left (0,0) texture space
-                    Vector2 cropPos = new Vector2(frame.offsetX, file.height - frame.offsetY - image.finalHeight);
+                    Vector2 cropPos = new Vector2(info.offsetX, file.height - info.offsetY - image.finalHeight);
 
                     // TODO: if no pivots, can we skip for this frame?
-                    Vector2 pivotTex = ( target.pivots.ContainsKey(frame.frameNum) ) ? target.pivots[frame.frameNum] : Vector2.zero;
+                    Vector2 pivotTex = ( target.pivots.ContainsKey(info.frameNum) ) ? target.pivots[info.frameNum] : Vector2.zero;
 
                     // get pivot coordinates in relation to sprite's position in final texture
                     pivotTex -= cropPos;
@@ -90,8 +90,9 @@ namespace MetaSpritePlus.Internal {
                     newPivotNorm =  Vector2.Scale(pivotTex, new Vector2(1.0f / image.finalWidth, 1.0f / image.finalHeight));
 
                     // save everything
-                    target.pivotNorms.Add(frame.frameNum, newPivotNorm);
-                    target.dimensions.Add(frame.frameNum, new Dimensions { frame = frame.frameNum, width = image.finalWidth, height = image.finalHeight });
+                    target.pivotNorms.Add(info.frameNum, newPivotNorm);
+                    target.dimensions.Add(info.frameNum, new Dimensions { frame = info.frameNum, width = image.finalWidth, height = image.finalHeight });
+                    target.sortOrder.Add(info.frameNum, info.sortOrder);
                     metadata.pivot = newPivotNorm;
                     metaList.Add(metadata);
                 });
@@ -154,18 +155,15 @@ namespace MetaSpritePlus.Internal {
 
                     var image = ExtractImage(ctx, cels, targetPath, frame.frameNum);
 
+                    // if this frame's image has content, then check if it already exists. if so, reuse it but pass along the frame info.
                     if ( image.hasContent ) {
-                        // see if this image already exists
                         bool exists = false;
                         foreach ( var curImage in images ) {
-                            // first check the width and height
-                            if ( curImage.finalWidth == image.finalWidth && curImage.finalHeight == image.finalHeight ) {
-                                if ( curImage.Equals(image) ) {
-                                    Debug.Log($"Matched image {targetPath} frame {frame.frameNum} with image {curImage.frameData[0].targetPath} frame {curImage.frameData[0].frameNum}");
-                                    curImage.frameData.Add(image.frameData[0]);
-                                    exists = true;
-                                    break;
-                                }
+                            if ( curImage.Equals(image) ) {
+                                //Debug.Log($"Matched image {targetPath} frame {frame.frameNum} with image {curImage.frameData[0].targetPath} frame {curImage.frameData[0].frameNum}");
+                                curImage.frameInfo.Add(image.frameInfo[0]);
+                                exists = true;
+                                break;
                             }
                         }
 
@@ -186,11 +184,14 @@ namespace MetaSpritePlus.Internal {
          */
         private static FrameImage ExtractImage(ImportContext ctx, List<Cel> cels, string targetPath, int frameNum)
         {
-            var file     = ctx.file;
-            var settings = ctx.settings;
-            var image    = new FrameImage(file.width, file.height);
+            var file       = ctx.file;
+            var settings   = ctx.settings;
+            var image      = new FrameImage(file.width, file.height);
+            int? sortOrder = null;
 
             foreach ( var cel in cels ) {
+                //  get the sort order for the layer this cell belongs to. we'll eventually keep the largest value.
+                int? celSortOrder = ctx.file.layers.Where(layer => layer.index ==  cel.layerIndex).First().sortOrder;
                 for ( int cy = 0; cy < cel.height; ++cy ) {
                     for ( int cx = 0; cx < cel.width; ++cx ) {
                         var c = cel.GetPixelRaw(cx, cy);
@@ -215,6 +216,13 @@ namespace MetaSpritePlus.Internal {
 
                                 image.maxx = Mathf.Max(image.maxx, x);
                                 image.maxy = Mathf.Max(image.maxy, y);
+
+                                // we'll save the greatest sort order value found, if any
+                                if ( sortOrder == null ) {
+                                    sortOrder = celSortOrder;
+                                } else if ( celSortOrder != null && celSortOrder > sortOrder ) {
+                                    sortOrder = celSortOrder;
+                                }
                             }
                         }
                     }
@@ -234,11 +242,12 @@ namespace MetaSpritePlus.Internal {
             }
 
             // save frame-specific data
-            finalImage.frameData.Add( new FrameImageData() {
-                frameNum = frameNum,
-                offsetX = image.minx,
-                offsetY = image.miny,
+            finalImage.frameInfo.Add( new FrameInfo() {
+                frameNum   = frameNum,
+                offsetX    = image.minx,
+                offsetY    = image.miny,
                 targetPath = targetPath,
+                sortOrder  = sortOrder,
             });
             finalImage.minx = 0;
             finalImage.miny = 0;
@@ -328,7 +337,7 @@ namespace MetaSpritePlus.Internal {
             public int minx = int.MaxValue, miny = int.MaxValue, 
                        maxx = int.MinValue, maxy = int.MinValue;
 
-            public List<FrameImageData> frameData = new List<FrameImageData>();
+            public List<FrameInfo> frameInfo = new List<FrameInfo>();
 
             public int finalWidth {
                 get {
@@ -370,6 +379,10 @@ namespace MetaSpritePlus.Internal {
 
             public bool Equals(FrameImage other)
             {
+                if ( data.Length != other.data.Length ) {
+                    return false;
+                }
+
                 for ( int i = 0; i < data.Length; ++i ) {
                     if ( data[i] != other.data[i] ) {
                         //Debug.Log($"Sprite differs at (" + i % finalWidth + ", " + (i/finalWidth) + ")");
@@ -382,14 +395,16 @@ namespace MetaSpritePlus.Internal {
 
 
         /**
-         * Data structure to hold metadata of each image. This is so we can reuse images even if they have different metadata.
+         * Data structure to hold info about each image in a frame.
+         * Storing this outside of the image helps us reuse images.
          */
-        class FrameImageData
+        class FrameInfo
         {
             public int frameNum;    // animation frame that this data applies to
             public int offsetX;     // original offset of image before trimmed of whitespace
             public int offsetY;
-            public string targetPath;   // target path for this frame
+            public string targetPath;     // target path for this frame
+            public int? sortOrder = null; // apply this to sprite renderer's sorting order. if null, don't animate
         }
 
     }
