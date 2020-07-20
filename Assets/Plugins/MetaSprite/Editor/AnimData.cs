@@ -101,17 +101,23 @@ namespace MetaSpritePlus
         }
 
 
-        public List<Vector2> DataCoords(string clipName, string targetName, string dataName, int frameNum)
+        /**
+         * Gets data coordinates, but returns them in local-space by using PPU
+         */
+        public List<Vector3> GetLocalData(string clipName, string targetName, string dataName, int frameNum, bool flipX=false)
         {
-            List<Vector2> pxlCoords = FindAllData(clipName, targetName, dataName, frameNum);
-            List<Vector2> locCoords = new List<Vector2>();
-            if ( pxlCoords != null ) {
-                for ( int i=0; i<pxlCoords.Count; i++ ) {
-                    Vector2 coord = pxlCoords[i] / ppu;
-                    locCoords.Add(coord);
+            List<Vector2> texelCoords = GetData(clipName, targetName, dataName, frameNum);
+            List<Vector3> localCoords = new List<Vector3>();
+            if ( texelCoords != null ) {
+                for ( int i=0; i<texelCoords.Count; i++ ) {
+                    Vector3 coord = texelCoords[i] / ppu;
+                    if ( flipX ) {
+                        coord.x = -coord.x;
+                    }
+                    localCoords.Add(coord);
                 }
             }
-            return locCoords;
+            return localCoords;
         }
 
 
@@ -129,11 +135,11 @@ namespace MetaSpritePlus
 
 
         /**
-         * finds the first point for the animation and data name.  Or null.
+         * Returns the first coordinate for the animation and data name. Or null.
          */
-        public Vector2? FindFirstDataCoord(string clipName, string targetName, string dataName, int frame)
+        public Vector2? GetFirstData(string clipName, string targetName, string dataName, int frame)
         {
-            List<Vector2> coords = FindAllData(clipName, targetName, dataName, frame);
+            List<Vector2> coords = GetData(clipName, targetName, dataName, frame);
             if ( coords != null ) {
                 return coords[0];
             }
@@ -143,9 +149,9 @@ namespace MetaSpritePlus
 
 
         /**
-         * Gets all the data for the specified animation and target
+         * Gets all the data for the specified animation and target. Or null.
          */
-        public List<Vector2> FindAllData(string clipName, string targetName, string dataName, int frameNum)
+        public List<Vector2> GetData(string clipName, string targetName, string dataName, int frameNum)
         {
             if ( animations.TryGetValue(clipName, out Animation animation) ) {
                 if ( animation.targets.TryGetValue(targetName, out TargetData targetData) ) {
@@ -160,66 +166,32 @@ namespace MetaSpritePlus
             return null;
         }
 
-        /**
-         * Temporary overload.
-         * TODO: find anything that uses this and include targetName
-         */
-        public List<Vector2> FindAllData(string clipName, string dataName, int frameNum)
-        {
-            var frame = new System.Diagnostics.StackFrame(1, true);
-            var method = frame.GetMethod();
-            var fileName = frame.GetFileName();
-            var lineNumber = frame.GetFileLineNumber();
-            Debug.LogWarning($"migrate {fileName}:{lineNumber} {method} use of FindAllData() to use target.");
-
-            return FindAllData(clipName, "/", dataName, frameNum);
-        }
-
 
         /**
          * Calculates the difference in world-space between data points in two clips.
          * Typically, this is the position of something in the last frame of one animation, 
          * and the position of that in the first frame of the next animation.
          */
-        public Vector3 dataCoordDiff(string clipFrom, string targetFrom, string dataFrom, int frameFrom, bool flipFrom, string clipTo, string targetTo, string dataTo, int frameTo, bool flipTo, bool debug = false)
+        public Vector3 DataDiff(string clipFrom, string targetFrom, string dataFrom, int frameFrom, bool flipFrom, string clipTo, string targetTo, string dataTo, int frameTo, bool flipTo, bool debug = false)
         {
-            Vector2? temp = FindFirstDataCoord(clipFrom, targetFrom, dataFrom, frameFrom);
+            Vector2? temp = GetFirstData(clipFrom, targetFrom, dataFrom, frameFrom);
             if ( temp == null ) {
                 Debug.LogWarning($"no coord for clip '{clipFrom}' data '{dataFrom}' at frame {frameFrom}");
                 return Vector3.zero;
             }
-            Vector2 from = (Vector2) temp;
+            Vector2 from = (Vector2) temp / ppu;
 
-            Debug.Log("needs migration from dims to sprit data..."); /* TODO: fix */
-            temp = FindFirstDataCoord(clipFrom, targetFrom, "dims", frameFrom);
-            if ( temp == null ) {
-                Debug.LogWarning($"no dimension found for clip '{clipFrom}' in animation data");
-                return Vector3.zero;
-            }
-            Vector2 fromDims = (Vector2) temp/ppu;
-
-            temp = FindFirstDataCoord(clipTo, targetTo, dataTo, frameTo);
+            temp = GetFirstData(clipTo, targetTo, dataTo, frameTo);
             if ( temp == null ) {
                 Debug.LogWarning($"no coord for clip '{clipTo}' data '{dataTo}' at frame {frameTo}");
                 return Vector3.zero;
             }
-            Vector2 to = (Vector2) temp;
+            Vector2 to = (Vector2) temp / ppu;
 
-            Debug.Log("needs migration from dims to sprit data..."); /* TODO: fix */
-            temp = FindFirstDataCoord(clipTo, targetTo, "dims", frameTo);
-            if ( temp == null ) {
-                Debug.LogWarning($"no dimension found for clip '{clipTo}' in animation data");
-                return Vector3.zero;
-            }
-            Vector2 toDims = (Vector2) temp/ppu;
-
-            // convert from sprite-space to local-space
-            from = new Vector2(from.x * fromDims.x, from.y * fromDims.y);
             if ( flipFrom ) {
                 from.x = -from.x;
             }
 
-            to = new Vector2(to.x * toDims.x, to.y * toDims.y);
             if ( flipTo ) {
                 to.x = -to.x;
             }
@@ -232,24 +204,6 @@ namespace MetaSpritePlus
 
             return diff;
         }
-
-
-        /**
-         * Temporary overload.
-         * TODO: find anything that uses this and include targetName
-         */
-        public Vector3 dataCoordDiff(string clipFrom, string dataFrom, int frameFrom, bool flipFrom, string clipTo, string dataTo, int frameTo, bool flipTo, bool debug = false)
-        {
-            var frame = new System.Diagnostics.StackFrame(1, true);
-            var method = frame.GetMethod();
-            var fileName = frame.GetFileName();
-            var lineNumber = frame.GetFileLineNumber();
-
-            Debug.LogWarning($"migrate {fileName}:{lineNumber} {method} use of FindAllData() to use target.");
-
-            return dataCoordDiff(clipFrom, "/", dataFrom, frameFrom, flipFrom, clipTo, "/", dataTo, frameTo, flipTo, debug);
-        }
-
 
 
         /**
@@ -268,7 +222,7 @@ namespace MetaSpritePlus
             }
 
             // get the sprite's dimensions
-            Vector2? temp = FindFirstDataCoord(clipName, targetName, "dims", frame);
+            Vector2? temp = GetFirstData(clipName, targetName, "dims", frame);
             if ( temp == null ) {
                 Debug.LogWarning($"no dimensions found for '{clipName}' in animation data");
                 return Vector2.zero;
@@ -296,26 +250,20 @@ namespace MetaSpritePlus
         }
 
 
-        // The distance, in world coordinates, between last frame's pivot and this frame's pivot
+        /**
+         * The distance, in world coordinates, between last frame's pivot and this frame's pivot
+         */
         public Vector3 GetPivotDiff(string clipName, int frame, bool flipX = false)
         {
-            // get the sprite's dimensions
-            Debug.LogWarning($"GetPivotDiff() needs migrating. Use root object location.");
-            Vector2? temp = FindFirstDataCoord(clipName, "/", "dims", frame);
-            if ( temp == null ) {
-                Debug.LogWarning($"no dimensions found for '{clipName}' in animation data at frame {frame}");
-                return Vector2.zero;
-            }
-            Vector2 dims = (Vector2) temp/ppu;
-
             // previous pivot's coord is relative to the current pivot
-            temp = FindFirstDataCoord(clipName, "/", "prev pivot", frame);
+            Vector2? temp = GetFirstData(clipName, "/", "prev pivot", frame);
             if ( temp == null ) {
                 return Vector2.zero;
             }
             Vector2 prevPos = (Vector2) temp;
 
-            Vector2 diff = - prevPos * dims;
+            Vector2 diff = - prevPos;
+            diff = diff / ppu;
 
             if ( flipX ) {
                 return new Vector3(-diff.x, diff.y, 0);

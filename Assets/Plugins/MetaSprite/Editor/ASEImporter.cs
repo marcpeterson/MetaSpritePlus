@@ -830,7 +830,8 @@ namespace MetaSpritePlus {
 
                         // move the target according to its offset
                         if ( target.offsets.TryGetValue(i, out offset) ) {
-                            // infinity removes interpolation between frames, so change happens immediately when keyframe is reached
+                            // infinity removes interpolation between frames, so change happens immediately when keyframe is reached.
+                            // can't set TangentMode to Constant. this does the same thing.
                             hasOffset = true;
                             tformXKeyFrames.Add(new Keyframe(time, offset.x / ctx.settings.ppu, float.PositiveInfinity, float.PositiveInfinity));
                             tformYKeyFrames.Add(new Keyframe(time, offset.y / ctx.settings.ppu, float.PositiveInfinity, float.PositiveInfinity));
@@ -847,16 +848,11 @@ namespace MetaSpritePlus {
                      * Create any final keyframes
                      */
 
-                    time = duration * 0.001f - 1.0f / clip.frameRate;   // clip duration in seconds, minus one frame's time
+                    time = (duration * 0.001f) - (1.0f / clip.frameRate);   // clip duration in seconds, minus one frame's time
 
                     // Give the last frame an extra keyframe at the end of the animation to give that frame its duration
                     if ( didPrevFrameHaveSprite ) {
                         spriteKeyFrames.Add(new ObjectReferenceKeyframe { time = time, value = sprite });
-                    }
-
-                    if ( hasOffset ) {
-                        tformXKeyFrames.Add(new Keyframe(time, offset.x / ctx.settings.ppu, float.PositiveInfinity, float.PositiveInfinity));
-                        tformYKeyFrames.Add(new Keyframe(time, offset.y / ctx.settings.ppu, float.PositiveInfinity, float.PositiveInfinity));
                     }
 
                     // only save sprite keyframes if they exist
@@ -874,6 +870,12 @@ namespace MetaSpritePlus {
 
                     // only save offsets if they exist.  offsets are transforms.
                     if ( tformXKeyFrames.Count > 0 ) {
+                        // copy the first transform keyframe to the end. this prevents a unity bug that causes the entire sequence
+                        // to drift out of position during playback. time must be after final sprite keyframe to prevent popping.
+                        time = duration * 0.001f;   // very end of animation
+                        tformXKeyFrames.Add(new Keyframe(time, tformXKeyFrames[0].value, float.PositiveInfinity, float.PositiveInfinity));
+                        tformYKeyFrames.Add(new Keyframe(time, tformYKeyFrames[0].value, float.PositiveInfinity, float.PositiveInfinity));
+
                         debugStr += ($" - final target '{finalTarget}' offset count: {tformXKeyFrames.Count}\n");
                         clip.SetCurve(finalTarget, typeof(Transform), "localPosition.x", new AnimationCurve(tformXKeyFrames.ToArray()));
                         clip.SetCurve(finalTarget, typeof(Transform), "localPosition.y", new AnimationCurve(tformYKeyFrames.ToArray()));

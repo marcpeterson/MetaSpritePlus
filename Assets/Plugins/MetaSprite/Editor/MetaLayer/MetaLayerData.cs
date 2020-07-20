@@ -70,11 +70,11 @@ namespace MetaSpritePlus {
 
                                     // get the target's pivot location on the original texture
                                     Vector2 pivotTex;
-                                    if ( target.pivots.ContainsKey(frameNum) ) {
-                                        pivotTex = target.pivots[frameNum];
+                                    if ( target.pivots.ContainsKey(i) ) {
+                                        pivotTex = target.pivots[i];
                                     } else {
                                         pivotTex = Vector2.zero;
-                                        Debug.Log($"@data layer '{layer.layerName}' has no pivot for frame {frameNum}");
+                                        Debug.Log($"@data layer '{layer.layerName}' has no pivot for frame {i}");
                                     }
 
                                     // subtract pivot location to make coordinate relative to target's pivot
