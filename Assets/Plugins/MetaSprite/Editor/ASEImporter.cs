@@ -357,7 +357,7 @@ namespace MetaSpritePlus {
                     debugStr += Util.IndentColTab(str: $"{layer.index} - {layer.layerName}", indent: layer.childLevel, numCharInCol: 40) + target + "\n";
                 });
 
-            //Debug.Log($"=== TARGETS ===\n{debugStr}");
+            Debug.Log($"=== TARGETS ===\n{debugStr}");
         }
 
 
@@ -475,21 +475,26 @@ namespace MetaSpritePlus {
                 } else {
                     ctx.targets[pivotLayer.targetPath].pivotIndex = pivotLayer.index;
                     ctx.targets[pivotLayer.targetPath].pivots = CalcPivotsForAllFrames(ctx, pivotLayer);
+                    debugStr += $"target '{pivotLayer.targetPath}' has {ctx.targets[pivotLayer.targetPath].pivots.Count} pivots\n";
                 }
             });
 
             // if the root doesn't have a pivotIndex, then use the default pivot
             var rootTarget = ctx.targets["/"];
             if ( rootTarget.pivotIndex == Target.DEFAULT_PIVOT ) {
-                debugStr += $" ** root has no pivot layer. using default pivot {ctx.settings.alignment} = {ctx.settings.PivotRelativePos}\n";
-                var pivots = new Dictionary<int, Vector2>();
-                var file = ctx.file;
+                if ( ctx.settings.alignment == SpriteAlignmentEx.None ) {
+                    debugStr += $" ** root has no pivot layer. not creating default because alignment set to 'None'\n";
+                } else {
+                    debugStr += $" ** root has no pivot layer. using default pivot {ctx.settings.alignment} = {ctx.settings.PivotRelativePos}\n";
+                    var pivots = new Dictionary<int, Vector2>();
+                    var file = ctx.file;
 
-                for ( int i = 0; i < file.frames.Count; ++i ) {
-                    var defaultPivotTex = Vector2.Scale(ctx.settings.PivotRelativePos, new Vector2(ctx.file.width, ctx.file.height));
-                    pivots.Add(i, defaultPivotTex);
+                    for ( int i = 0; i < file.frames.Count; ++i ) {
+                        var defaultPivotTex = Vector2.Scale(ctx.settings.PivotRelativePos, new Vector2(ctx.file.width, ctx.file.height));
+                        pivots.Add(i, defaultPivotTex);
+                    }
+                    rootTarget.pivots = pivots;
                 }
-                rootTarget.pivots = pivots;
             }
 
             // calculate pivot offets for all frames between parent and child pivot layers
@@ -505,9 +510,9 @@ namespace MetaSpritePlus {
                     while ( !found && targetPath != "/" ) {
                         var parentTarget = FindParentTarget(ctx, targetPath);
                         if ( parentTarget.pivotIndex != target.pivotIndex ) {
-                            target.offsets = CalcPivotOffsets(ctx, parentTarget.pivots, target.pivots, pivotLayer.targetPath);
+                            debugStr += $" - found parent {parentTarget.path}\n";
+                            target.offsets = CalcPivotOffsets(ctx, parentTarget, target);
                             found = true;
-                            debugStr += $" - found target {parentTarget.path}\n";
                         } else {
                             targetPath = parentTarget.path;
                         }
@@ -518,7 +523,7 @@ namespace MetaSpritePlus {
                         Debug.LogWarning($"Could not find parent pivot for '{pivotLayer.targetPath}'");
                     }
                 } else {
-                    debugStr += $" - skipped because it's the root layer '/'\n";
+                    debugStr += $" - skipped offset calculation because it's the root layer '/'\n";
                 }
             });
 
@@ -553,7 +558,7 @@ namespace MetaSpritePlus {
                 debugStr += (target.pivotIndex == Target.DEFAULT_PIVOT) ? "DEFAULT\n" : $"{target.pivotIndex}\n";
             }
 
-            //Debug.Log(debugStr);
+            Debug.Log(debugStr);
         }
 
 
@@ -567,6 +572,8 @@ namespace MetaSpritePlus {
             var pivots = new Dictionary<int, Vector2>();
             var file = ctx.file;
 
+            string debugStr = $"=== PIVOTS FOR {pivotLayer.layerName} ===\n";
+            
             for ( int i = 0; i < file.frames.Count; ++i ) {
                 Cel cel;
                 file.frames[i].cels.TryGetValue(pivotLayer.index, out cel);
@@ -593,12 +600,14 @@ namespace MetaSpritePlus {
                         // pivot becomes the average of all pixels found
                         center /= pixelCount;
                         pivots.Add(i, center);
+                        debugStr += $" - frame {i} - ({center.x}, {center.y})\n";
                     } else {
                         Debug.LogWarning($"Pivot layer '{pivotLayer.layerName}' is missing a pivot pixel in frame {i}");
                     }
                 }
             }
 
+            Debug.Log(debugStr);
             return pivots;
         }
 
@@ -609,27 +618,27 @@ namespace MetaSpritePlus {
          * Because all pivots are stored in texture space, we don't need to calculate up the entire chain of pivots. Simply comparing the parent and child pivot
          * is all that's needed.
          */
-        static Dictionary<int, Vector2> CalcPivotOffsets(ImportContext ctx, Dictionary<int, Vector2> parentPivots, Dictionary<int, Vector2> targetPivots, string targetPath)
+        static Dictionary<int, Vector2> CalcPivotOffsets(ImportContext ctx, Target parent, Target target)
         {
             string debugStr = "";
-            debugStr += $"CalcPivotOffsets - {targetPath}\n";
+            debugStr += $"=== PIVOT OFFSETS BETWEEN {parent.path} AND {target.path} ===\n";
             var offsets = new Dictionary<int, Vector2>();
 
-            if ( targetPivots == null ) {
+            if ( target.pivots == null ) {
                 debugStr += $" - exiting because no target pivots\n";
                 Debug.LogWarning(debugStr);
                 return offsets;
             }
 
-            if ( parentPivots != null && parentPivots.Count > 0 ) {
-                debugStr += $" - has {parentPivots.Count} parent pivots\n";
+            if ( parent.pivots != null && parent.pivots.Count > 0 ) {
+                debugStr += $" - has {parent.pivots.Count} parent pivots\n";
                 // for each frame, calculate difference between parent pivot and child pivot
-                foreach ( var item in targetPivots ) {
+                foreach ( var item in target.pivots ) {
                     Vector2 offset;
                     int frameNum  = item.Key;
                     Vector2 pivot = item.Value;
 
-                    if ( parentPivots.TryGetValue(frameNum, out Vector2 parentPivot) ) {
+                    if ( parent.pivots.TryGetValue(frameNum, out Vector2 parentPivot) ) {
                         debugStr += $" - frame {frameNum} parent pivot: ({parentPivot.x}, {parentPivot.y})\n";
                         offset = pivot - parentPivot;
                     } else {
@@ -639,18 +648,18 @@ namespace MetaSpritePlus {
                         //   pivot is essentially the root.  The sprite will be drawn in relation to this pivot.
                         // BUT - This means the pivot should not move.  Doing so will actually move the sprite in the opposite direction.  Check.
                         if ( frameNum == 0 ) {
-                            var lastItem = targetPivots.Last();
+                            var lastItem = target.pivots.Last();
                             Vector2 prevPivot = lastItem.Value;
                             if ( prevPivot != pivot ) {
-                                Debug.LogWarning($"Target '{targetPath}' has no parent pivot, but pivot changes from last to first frame. This may cause unintented sprite movement.");
+                                Debug.LogWarning($"Target '{target.path}' has no parent pivot, but pivot changes from last to first frame. This may cause unintented sprite movement.");
                             }
                         } else {
-                            if ( targetPivots.TryGetValue(frameNum-1, out Vector2 prevPivot) ) {
+                            if ( target.pivots.TryGetValue(frameNum-1, out Vector2 prevPivot) ) {
                                 if ( prevPivot != null && prevPivot != pivot ) {
-                                    Debug.LogWarning($"Target '{targetPath}' has no parent pivots, but its pivot changes in frame {frameNum}.  This may cause unintented sprite movement.");
+                                    Debug.LogWarning($"Target '{target.path}' has no parent pivots, but its pivot changes in frame {frameNum}.  This may cause unintented sprite movement.");
                                 }
                             } else {
-                                Debug.LogWarning($"Target '{targetPath}' has no parent pivots, but its missing a pivot location frame {frameNum-1}.  This may cause unintented sprite movement.");
+                                Debug.LogWarning($"Target '{target.path}' has no parent pivots, but its missing a pivot location frame {frameNum-1}.  This may cause unintented sprite movement.");
                             }
                         }
 
@@ -660,21 +669,25 @@ namespace MetaSpritePlus {
                     offsets.Add(frameNum, offset);
                 }
             } else {
-                debugStr += $" - using default pivot\n";
-                debugStr += $" - alignment {ctx.settings.alignment} = {ctx.settings.PivotRelativePos}\n";
-                // no parent pivots so use the default pivot
-                foreach ( var item in targetPivots ) {
-                    // calculate default pivot position relative to the entire source texture. converts coordinate to pixel-space.
-                    int frameNum  = item.Key;
-                    Vector2 pivot = item.Value;
+                if ( ctx.settings.alignment == SpriteAlignmentEx.None ) {
+                    debugStr += $" - no parent pivots, and default set to None. no offset needed.\n";
+                } else {
                     var defaultPivotTex = Vector2.Scale(ctx.settings.PivotRelativePos, new Vector2(ctx.file.width, ctx.file.height));
-                    var offset = pivot - defaultPivotTex;
-                    debugStr += $"   frame: {frameNum} default: ({defaultPivotTex.x}, {defaultPivotTex.y}) offset: ({offset.x}, {offset.y})\n";
-                    offsets.Add(frameNum, offset);
+                    debugStr += $" - no parent pivots, so using default pivot location\n";
+                    debugStr += $" - alignment {ctx.settings.alignment} = {ctx.settings.PivotRelativePos} = pixel ({defaultPivotTex.x}, {defaultPivotTex.y})\n";
+                    // no parent pivots so use the default pivot
+                    foreach ( var item in target.pivots ) {
+                        // calculate default pivot position relative to the entire source texture. converts coordinate to pixel-space.
+                        int frameNum  = item.Key;
+                        Vector2 pivot = item.Value;
+                        var offset = pivot - defaultPivotTex;
+                        debugStr += $"   frame: {frameNum} default: ({defaultPivotTex.x}, {defaultPivotTex.y}) offset: ({offset.x}, {offset.y})\n";
+                        offsets.Add(frameNum, offset);
+                    }
                 }
             }
 
-            //Debug.Log(debugStr);
+            Debug.Log(debugStr);
             return offsets;
         }
 

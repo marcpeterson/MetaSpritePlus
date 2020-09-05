@@ -15,12 +15,28 @@ namespace MetaSpritePlus {
         Skip, CreateOrOverride
     }
 
+    // Hacky extension of Unity's SpriteAlignment so we can have "None" as a value
+    public enum SpriteAlignmentEx
+    {
+        None = 10,
+        Center = 0,
+        TopLeft = 1,
+        TopCenter = 2,
+        TopRight = 3,
+        LeftCenter = 4,
+        RightCenter = 5,
+        BottomLeft = 6,
+        BottomCenter = 7,
+        BottomRight = 8,
+        Custom = 9
+    }
+
     [CreateAssetMenu(menuName = "ASE Import Settings")]
     public class ImportSettings : ScriptableObject {
 
         public int ppu = 100;
 
-        public SpriteAlignment alignment;
+        public SpriteAlignmentEx alignment = SpriteAlignmentEx.None;
 
         public Vector2 defaultPivot;
 
@@ -80,12 +96,12 @@ namespace MetaSpritePlus {
 
             EGL.Space();
 
-            settings.alignment = (SpriteAlignment) EGL.EnumPopup(new GUIContent("Default Pivot",
-                "The default position of the pivot in relation to the sprite\n" +
-                "Only used for files without a base @pivot layer"),
+            settings.alignment = (SpriteAlignmentEx) EGL.EnumPopup(new GUIContent("Default Pivot",
+                "The default pivot location in relation to the sprite's texture. " +
+                "Only used for files without a root '@pivot' layer. "),
                 settings.alignment);
 
-            if (settings.alignment == SpriteAlignment.Custom) {
+            if (settings.alignment == SpriteAlignmentEx.Custom) {
                 settings.defaultPivot = EGL.Vector2Field(new GUIContent("Custom", "Use a value from 0 to 1, where (0, 0) " +
                     "is the bottom-left of the sprite, and (1, 1) is the top-right of the sprite"), settings.defaultPivot);
             }
