@@ -26,12 +26,17 @@ namespace MetaSpritePlus {
 
             LayerParamType paramType = layer.GetParamType(1);
 
+            /*
             foreach (var frametag in file.frameTags) {
                 var clip = ctx.generatedClips[frametag];
+            */
+
+            foreach ( var clipInfo in ctx.generatedClips ) {
+                var clip = clipInfo.clip;
                 var events = new List<AnimationEvent>(clip.events);
 
                 var time = 0.0f;
-                for (int f = frametag.from; f <= frametag.to; ++f) {
+                for (int f = clipInfo.tag.from; f <= clipInfo.tag.to; ++f) {
                     if (eventFrames.Contains(f)) {
                         var evt = new AnimationEvent {
                             time = time,

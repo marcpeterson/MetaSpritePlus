@@ -10,7 +10,6 @@ using GenericToDataString;  // for object dumper
 
 using MetaSpritePlus.Internal;
 using System.Linq;
-using UnityEngine.Rendering;
 
 namespace MetaSpritePlus {
 
@@ -29,7 +28,7 @@ namespace MetaSpritePlus {
         public string animDataDirectory;
 
         public List<Sprite> generatedSprites = new List<Sprite>();
-
+        
         /**
          * @config() meta layer key/value data stored here.
          * Since ImportSettings can be shared between multiple Aseprite files, this allows us to store config values specific to this file
@@ -37,17 +36,28 @@ namespace MetaSpritePlus {
          *   "animator-layer"   Name of the Animator Layer to save the clips to. By default all clips and states are saved on the default unity "Base Layer"
          */
         public Dictionary<string, dynamic> config = new Dictionary<string, dynamic>();
-
-        // stored date about each sprite target
+        
+        // info about each sprite target
         public Dictionary<string, Target> targets = new Dictionary<string, Target>();
 
-        public Dictionary<FrameTag, AnimationClip> generatedClips = new Dictionary<FrameTag, AnimationClip>();
+        // a list of all the animator layers we'll render to
+        public List<String> animatorLayers = new List<String>();
+
+        public List<ClipInfo> generatedClips = new List<ClipInfo>();
 
         // this will be saved to an AnimData game object
         public AnimData animData;
 
     }
     
+    public class ClipInfo
+    {
+        public string clipName;
+        public string animatorLayer;
+        public FrameTag tag;
+        public AnimationClip clip;
+    }
+
     public class Dimensions
     {
         public int frame;
@@ -56,8 +66,8 @@ namespace MetaSpritePlus {
     }
 
     /**
-     * Stores data for each target.  Each split sprite will render to a target.  This class is used to collect
-     * data related to the target.
+     * Each sprite will associate to a sprite renderer in the character's game object tree. The target defines the path to that object in the tree,
+     * and all the data needed to render an animation clip to it.
      * 
      * TODO: consider using animData as storage? Most things end up there. seems a bit weird to save data here
      *       only to transfer it again to the final animData serialized object. Although Targets contain
@@ -67,6 +77,7 @@ namespace MetaSpritePlus {
         public static int DEFAULT_PIVOT = -100; // default pivot index
         public string path;                     // path to gameobject we will render to
         public string spriteName;               // base name of sprite in atlas for this target
+        public string animatorLayer;            // name of the layer in the animator state machine to render to
         public int pivotIndex = DEFAULT_PIVOT;  // the target's pivot layer
         public Dictionary<int, Vector2> pivots        = new Dictionary<int, Vector2>();    // pivots in texture space. in pixels.
         public Dictionary<int, Vector2> offsets       = new Dictionary<int, Vector2>();    // offset, in pixels, between this target's pivots and its parent's pivots. (0,0) if no parent pivots.
@@ -175,6 +186,8 @@ namespace MetaSpritePlus {
                 fileNameNoExt = Path.GetFileNameWithoutExtension(path),
                 animData = ScriptableObject.CreateInstance<AnimData>(),
             };
+
+            context.animatorLayers.Add(""); // add a default animator layer
 
             try {
 
@@ -343,7 +356,10 @@ namespace MetaSpritePlus {
                 .ForEach(layer =>
                 {
                     var target = ExtractLayerTarget(ctx, layer);
-                    debugStr += Util.IndentColTab(str: $"{layer.index} - {layer.layerName}", indent: layer.childLevel, numCharInCol: 40) + target + "\n";
+                    debugStr += Util.IndentColTab(str: $"{layer.index} - {layer.layerName}", indent: layer.childLevel, numCharInCol: 40)
+                        + Util.IndentColTab(str: target, indent: 0, numCharInCol: 30);
+                    if ( layer.animatorLayer != null ) debugStr += " -> " + layer.animatorLayer;
+                    debugStr += "\n";
                 });
 
             // now set up targets for pivot and data layers.  this is so we can warn users if a pivot target doesn't have any content layers.
@@ -354,7 +370,10 @@ namespace MetaSpritePlus {
                 .ForEach(layer =>
                 {
                     var target = ExtractLayerTarget(ctx, layer);
-                    debugStr += Util.IndentColTab(str: $"{layer.index} - {layer.layerName}", indent: layer.childLevel, numCharInCol: 40) + target + "\n";
+                    debugStr += Util.IndentColTab(str: $"{layer.index} - {layer.layerName}", indent: layer.childLevel, numCharInCol: 40)
+                        + Util.IndentColTab(str: target, indent: 0, numCharInCol: 30);
+                    if ( layer.animatorLayer != null ) debugStr += " -> " + layer.animatorLayer;
+                    debugStr += "\n";
                 });
 
             Debug.Log($"=== TARGETS ===\n{debugStr}");
@@ -367,10 +386,10 @@ namespace MetaSpritePlus {
 
             if ( layer.actionName == "data" && layer.parameters.Count > 1 ) {
                 // data layer requires a name. if 2 parameters, then 1st is a target and 2nd is the data's name
-                targetPath = layer.GetParamString(0);
+                targetPath = layer.GetParam(0);
             } else if ( layer.actionName != "data" && layer.parameters.Count > 0 ) {
                 // target path should be the 1st parameter
-                targetPath = layer.GetParamString(0);
+                targetPath = layer.GetParam(0);
             }
 
             if ( targetPath == "" ) {
@@ -387,7 +406,7 @@ namespace MetaSpritePlus {
                     Debug.LogWarning($"parent layer index {layer.parentIndex} not found");
                 }
             } else {
-                // else if layer/group has a target parameter, then see if it's aboslute or relative
+                // else if layer/group has a target parameter, then see if it's absolute or relative
                 targetPath.TrimEnd('/');                        // clean sloppy user data
                 if ( ! targetPath.StartsWith("/") ) {           // if not an absolute path, then append to parent target path
                     var parentLayer = ctx.file.FindLayer(layer.parentIndex);
@@ -398,18 +417,29 @@ namespace MetaSpritePlus {
                     }
                 }
 
-                // optional 2nd parameter should be the sort order
+                // digest optional parameters
+                //  - if a number, then it's the sort order
+                //  - if a string on a group layer, then it's the controller's animator layer (optional) and state machine (optional)
+                //    format is "animatorLayerName/stateMachineName/childMachineName/etc". start with slash for just a state machine path.
                 if ( layer.actionName != "data" ) {
-                    if ( layer.parameters.Count > 1 ) {
-                        dynamic sortOrder = layer.GetParam(1);
-                        if ( sortOrder != null ) {
-                            if ( layer.GetParam(1).GetType() == typeof(System.Double) ) {
-                                layer.sortOrder = Convert.ToInt32(layer.GetParam(1));
-                            } else {
-                                Debug.LogWarning($"Target '{targetPath}' has non-numeric 2nd parameter '{layer.GetParam(1)}' of type {layer.GetParam(1).GetType()}");
+                    int paramIdx = 1;
+                    while ( layer.parameters.Count > paramIdx ) {
+                        dynamic param = layer.GetParam(paramIdx);
+                        if ( param.GetType() == typeof(System.Double) ) {
+                            layer.sortOrder = Convert.ToInt32(param);
+                        } else if ( layer.type == LayerType.Group && param.GetType() == typeof(System.String) ) {
+                            layer.animatorLayer = Convert.ToString(param);
+                            if ( ! ctx.animatorLayers.Contains(layer.animatorLayer) ) {
+                                ctx.animatorLayers.Add(layer.animatorLayer);
                             }
+                            Debug.Log($"Group '{targetPath}' has animator layer '{layer.animatorLayer}'");
+                        } else {
+                            Debug.LogWarning($"Target '{targetPath}' has unprocessed parameter '{param}' of type {param.GetType()}");
                         }
-                    } else {
+                        paramIdx++;
+                    }
+
+                    if ( layer.sortOrder == null ) {
                         // no sort order, so use parent's
 
                         // TODO: test if this is working...
@@ -417,6 +447,14 @@ namespace MetaSpritePlus {
                         var parentLayer = ctx.file.FindLayer(layer.parentIndex);
                         if ( parentLayer != null ) {
                             layer.sortOrder = parentLayer.sortOrder;
+                        }
+                    }
+
+                    // if no animator layer, then use the parent's
+                    if ( layer.animatorLayer == null ) {
+                        var parentLayer = ctx.file.FindLayer(layer.parentIndex);
+                        if ( parentLayer != null ) {
+                            layer.animatorLayer = parentLayer.animatorLayer;
                         }
                     }
                 }
@@ -430,7 +468,8 @@ namespace MetaSpritePlus {
 
             if ( ! ctx.targets.ContainsKey(targetPath) ) {
                 var spriteName = targetPath.Replace('/', '.').Trim('.');
-                ctx.targets.Add(targetPath, new Target { path = targetPath, spriteName = spriteName });
+                string animatorLayer = ( layer.animatorLayer == null ) ? "" : layer.animatorLayer;  // convert null animator layer to default blank "" animator layer
+                ctx.targets.Add(targetPath, new Target { path = targetPath, spriteName = spriteName, animatorLayer = animatorLayer });
             }
 
             // keep track of how many layers and pivots each target has.  warn if more than one pivot.
@@ -699,50 +738,70 @@ namespace MetaSpritePlus {
 
         /**
          * STAGE 6 - Generate animation clips
-         * Each tag will get it's own animation clip.
+         * Each tag will get it's own animation clip. Each animator layer will get each tag/clip.
          */
         static void GenerateAnimClips(ImportContext ctx)
         {
+            string debugStr = $"=== CLIPS ===\n";
+
             var fileNamePrefix = ctx.animClipDirectory + '/' + ctx.settings.baseName;
 
-            // Generate one animation for each tag
+            // Generate one animation clip for each tag, for each animator layer
             foreach ( var tag in ctx.file.frameTags ) {
-                var clipPath = fileNamePrefix + '_' + tag.name + ".anim";
-                AnimationClip clip = AssetDatabase.LoadAssetAtPath<AnimationClip>(clipPath);
+                foreach ( var animLayer in ctx.animatorLayers ) {
+                    var clipName = tag.name;
+                    if ( animLayer != "" && animLayer != null ) {
+                        var animLayerName = GetLayerName(animLayer);
+                        if ( animLayerName != "" ) {
+                            clipName += "_" + animLayerName;
+                        }
+                    }
 
-                if ( ! ctx.animData.animations.ContainsKey(tag.name) ) {
-                    ctx.animData.animations.Add(tag.name, new Animation());
+                    var clipPath = fileNamePrefix + "_" + clipName + ".anim";
+
+                    debugStr += $"{clipPath} - clip '{clipName}' - layer '{animLayer}'\n";
+
+                    AnimationClip clip = AssetDatabase.LoadAssetAtPath<AnimationClip>(clipPath);
+
+                    if ( ! ctx.animData.animations.ContainsKey(tag.name) ) {
+                        ctx.animData.animations.Add(tag.name, new Animation());
+                    }
+
+                    // Create clip
+                    if ( ! clip ) {
+                        debugStr += $" - creating new clip\n";
+                        clip = new AnimationClip();
+                        AssetDatabase.CreateAsset(clip, clipPath);
+                    } else {
+                        debugStr += $" - existing clip\n";
+                        clip.ClearCurves(); // clear existing clip curves and keyframes
+                        AnimationUtility.SetAnimationEvents(clip, new AnimationEvent[0]);   // clear existing animation events
+                    }
+
+                    // Set loop property
+                    var loop = tag.properties.Contains("loop");
+                    var settings = AnimationUtility.GetAnimationClipSettings(clip);
+                    if ( loop ) {
+                        clip.wrapMode = WrapMode.Loop;
+                        settings.loopBlend = true;
+                        settings.loopTime = true;
+                    } else {
+                        clip.wrapMode = WrapMode.Clamp;
+                        settings.loopBlend = false;
+                        settings.loopTime = false;
+                    }
+                    AnimationUtility.SetAnimationClipSettings(clip, settings);
+
+                    EditorUtility.SetDirty(clip);
+
+                    var clipInfo = new ClipInfo { clipName = clipName, animatorLayer = animLayer, tag = tag, clip = clip };
+                    ctx.generatedClips.Add(clipInfo);
                 }
-
-                // Create clip
-                if ( ! clip ) {
-                    clip = new AnimationClip();
-                    AssetDatabase.CreateAsset(clip, clipPath);
-                } else {
-                    clip.ClearCurves(); // clear existing clip curves and keyframes
-                    AnimationUtility.SetAnimationEvents(clip, new AnimationEvent[0]);   // clear existing animation events
-                }
-
-                // Set loop property
-                var loop = tag.properties.Contains("loop");
-                var settings = AnimationUtility.GetAnimationClipSettings(clip);
-                if ( loop ) {
-                    clip.wrapMode = WrapMode.Loop;
-                    settings.loopBlend = true;
-                    settings.loopTime = true;
-                } else {
-                    clip.wrapMode = WrapMode.Clamp;
-                    settings.loopBlend = false;
-                    settings.loopTime = false;
-                }
-                AnimationUtility.SetAnimationClipSettings(clip, settings);
-
-                EditorUtility.SetDirty(clip);
-                ctx.generatedClips.Add(tag, clip);
             }
 
-            // Generate main image
-            GenerateClipImageLayer(ctx, ctx.settings.spriteRootPath, ctx.generatedSprites);
+            Debug.Log(debugStr);
+
+            GenerateClipSprites(ctx, ctx.settings.spriteRootPath, ctx.generatedSprites);
         }
 
 
@@ -750,31 +809,43 @@ namespace MetaSpritePlus {
          * STAGE 6B
          * For each target, set the sprite for each frame in the animation clip.
          */
-        public static void GenerateClipImageLayer(ImportContext ctx, string spriteRootPath, List<Sprite> frameSprites)
+        public static void GenerateClipSprites(ImportContext ctx, string spriteRootPath, List<Sprite> frameSprites)
         {
-            string debugStr = "=== CLIPS ===\n";
+            string debugStr = "=== SPRITES IN EACH CLIP ===\n";
 
             // get the user's path to the root sprite.  ensure it ends in a slash
             if ( spriteRootPath != "" ) {
                 spriteRootPath.TrimEnd('/');
             }
 
+            /*
             foreach ( var tag in ctx.file.frameTags ) {
                 debugStr += $"tag:'{tag.name}'\n";
                 string animName = tag.name;
-                AnimationClip clip = ctx.generatedClips[tag];
+                AnimationClip clip = ctx.generatedClips[tag.name];
+            */
+
+            foreach ( var clipInfo in ctx.generatedClips ) {
+                debugStr += $"clip:'{clipInfo.clipName}'\n";
+                var tag      = clipInfo.tag;
+                var clip     = clipInfo.clip;
+                var animName = tag.name;
 
                 foreach ( KeyValuePair<string, Target> entry in ctx.targets ) {
-                    var target = entry.Value;
-                    var targetPath = target.path;
-                    var spriteName = target.spriteName;
+                    var target      = entry.Value;
+                    var targetPath  = target.path;
+                    var spriteName  = target.spriteName;
                     var finalTarget = (spriteRootPath + targetPath).Trim('/');
 
-                    debugStr += $"target: '{targetPath}' - sprite: '{spriteName}'\n";
-                    debugStr += $" - num pivots {target.pivots.Count} - num pivot norms {target.pivotNorms.Count}\n";
+                    // only render targets that belong in this animator layer
+                    if ( target.animatorLayer != clipInfo.animatorLayer ) {
+                        continue;
+                    }
+                    
+                    debugStr += $" - target: '{targetPath}' - sprite: '{spriteName}'\n";
+                    debugStr += $"   - num pivots {target.pivots.Count} - num pivot norms {target.pivotNorms.Count}\n";
                     Sprite sprite = null;
                     Vector2 offset = new Vector2();
-                    bool hasOffset = false;
                     float time;
                     int duration = 0;   // store accumulated duration of frames.  on each loop iteration will have the start time of the cur frame, in ms
                     var spriteKeyFrames = new List<ObjectReferenceKeyframe>();
@@ -798,7 +869,7 @@ namespace MetaSpritePlus {
                         if ( sprite != null ) {
 
                             // only create animation data for this target if it's not empty
-                            if ( !ctx.animData.animations[animName].targets.ContainsKey(targetPath) ) {
+                            if ( ! ctx.animData.animations[animName].targets.ContainsKey(targetPath) ) {
                                 ctx.animData.animations[animName].targets.Add(targetPath, new TargetData { path = targetPath, atlasId = spriteName });
                             }
 
@@ -845,7 +916,6 @@ namespace MetaSpritePlus {
                         if ( target.offsets.TryGetValue(i, out offset) ) {
                             // infinity removes interpolation between frames, so change happens immediately when keyframe is reached.
                             // can't set TangentMode to Constant. this does the same thing.
-                            hasOffset = true;
                             tformXKeyFrames.Add(new Keyframe(time, offset.x / ctx.settings.ppu, float.PositiveInfinity, float.PositiveInfinity));
                             tformYKeyFrames.Add(new Keyframe(time, offset.y / ctx.settings.ppu, float.PositiveInfinity, float.PositiveInfinity));
                         }
@@ -907,7 +977,7 @@ namespace MetaSpritePlus {
                 }
             }
 
-            //Debug.Log(debugStr);
+            Debug.Log(debugStr);
         }
         
         
@@ -922,89 +992,57 @@ namespace MetaSpritePlus {
                 return;
             }
 
+            string debug = "=== ANIM CONTROLLER ===\n";
+
             var controller = AssetDatabase.LoadAssetAtPath<AnimatorController>(ctx.animControllerPath);
             if ( ! controller ) {
                 controller = AnimatorController.CreateAnimatorControllerAtPath(ctx.animControllerPath);
             }
 
-            AnimatorControllerLayer layer = null;
-            AnimatorControllerLayer[] layers = controller.layers;
+            AnimatorControllerLayer defaultAcLayer = null;
+            AnimatorControllerLayer[] acLayers = controller.layers;
+            string defaultSubMachinePath = "";
 
-            string debug = "Existing animator layers:\n";
-            for ( int i = 0; i<layers.Length; i++ ) {
-                debug += $" - layer {layers[i].name}\n";
-                for ( int n = 0; n < layers[i].stateMachine.states.Length; n++ ) {
-                    var state = layers[i].stateMachine.states[n];
-                    debug += $"   - State {state.state.name} id {state.state.nameHash}\n";
-                }
-            }
-
-            debug += $"\n\nRESULTS:\n";
-
-            bool found = false;
             if ( ctx.config.ContainsKey("animator-layer") ) {
-                string layerName = ctx.config["animator-layer"];
-                for ( int i=0; i<layers.Length; i++ ) {
-                    if ( layers[i].name == layerName ) {
-                        layer = layers[i];
-                        found = true;
-                        debug += $"Found animator layer '{layerName}'\n";
-                        break;
-                    }
-                }
-
-                if ( ! found ) {
-                    debug += $"Creating animator layer '{layerName}'\n";
-                    layer = new AnimatorControllerLayer();
-                    layer.name = layerName;
-                }
+                string animLayerName = ctx.config["animator-layer"];
+                defaultAcLayer = GetOrCreateAnimatorLayer(controller, animLayerName, ref debug);
+                defaultSubMachinePath = GetSubMachinePath(animLayerName);
+                debug += $"Config 'animator-layer' defined with '{animLayerName}', has submachine path '{defaultSubMachinePath}'\n";
             } else {
-                // otherwise just use the default layer
-                debug += $"Using default layer '{layers[0].name}'\n";
-                found = true;
-                layer = layers[0];
+                defaultAcLayer = controller.layers[0];
             }
 
-            if ( ! layer.stateMachine ) {
-                if ( found ) {
-                    // if we've found the layer in the controller, but it doesn't have a state machine, then something may be wrong
-                    Debug.LogWarning($"Animator layer '{layer.name}' had no state machine. Creating, but this could be sign of an error.");
+            debug += $"\nCreating animator layers from clip info:\n";
+            foreach ( var clipInfo in ctx.generatedClips ) {
+                AnimatorControllerLayer acLayer = defaultAcLayer;
+                string animLayerName = clipInfo.animatorLayer;
+                string subMachinePath;
+                debug += $" - clip '{clipInfo.clipName}' has animator layer '{animLayerName}'\n";
+                if ( animLayerName != "" ) {
+                    subMachinePath = GetSubMachinePath(animLayerName);
+                    acLayer = GetOrCreateAnimatorLayer(controller, clipInfo.animatorLayer, ref debug);
+                } else {
+                    subMachinePath = defaultSubMachinePath;
                 }
-                layer.stateMachine = new AnimatorStateMachine();
-                layer.stateMachine.name = layer.name;
-                if ( AssetDatabase.GetAssetPath(layer.stateMachine).Length == 0 ) {
-                    debug += $"New state maching not in asset database. Adding...\n";
-                    AssetDatabase.AddObjectToAsset(layer.stateMachine, AssetDatabase.GetAssetPath(controller));
-                }
+
+                var state = GetOrCreateAnimatorState(controller, acLayer, subMachinePath, clipInfo.tag.name, ref debug);
+                state.motion = clipInfo.clip;
             }
 
-            var stateTable = new Dictionary<string, AnimatorState>();
-            PopulateStateTable(stateTable, layer.stateMachine);
+            debug += "\nROOT STATE\n";
+            foreach ( var state in controller.layers[0].stateMachine.states ) {
+                debug += $"{state.state.name}\n";
+            }
 
-            foreach ( var pair in ctx.generatedClips ) {
-                var frameTag = pair.Key;
-                var clip = pair.Value;
-
-                AnimatorState animatorState;
-                stateTable.TryGetValue(frameTag.name, out animatorState);
-                if ( ! animatorState ) {
-                    debug += $"State '{frameTag.name}' not found. Adding.\n";
-                    animatorState = layer.stateMachine.AddState(frameTag.name);
-                }
-
-                animatorState.name = frameTag.name;
-                animatorState.motion = clip;
-                if ( AssetDatabase.GetAssetPath(animatorState).Length == 0 ) {
-                    debug += $"New state not in asset database. Adding...\n";
-                    AssetDatabase.AddObjectToAsset(animatorState, AssetDatabase.GetAssetPath(layer.stateMachine));
+            debug += "\nSUB MACHINES & STATES\n";
+            foreach ( var subMachine in controller.layers[0].stateMachine.stateMachines ) {
+                debug += $"machine: {subMachine.stateMachine.name}\n";
+                foreach ( var state in subMachine.stateMachine.states ) {
+                    debug += $" - state: {state.state.name}\n";
                 }
             }
 
-            if ( ! found ) {
-                controller.AddLayer(layer);
-            }
-
-            // Debug.Log(debug);
+            Debug.Log(debug);
 
             EditorUtility.SetDirty(controller);
             AssetDatabase.SaveAssets();
@@ -1012,42 +1050,131 @@ namespace MetaSpritePlus {
 
 
         /**
-         * STAGE 7 Helper
-         * Extracts all the states from a state machine and any of its sub state machines.
+         * Returns the submachine path embedded in a layer name.
+         * Given a layer name in the form "name/child/submachine/path", return "child/submachine/path", or ""
          */
-        static void PopulateStateTable(Dictionary<string, AnimatorState> table, AnimatorStateMachine machine)
+        static string GetSubMachinePath(string animLayerName)
         {
-            foreach ( var state in machine.states ) {
-                var name = state.state.name;
-                if ( table.ContainsKey(name) ) {
-                    Debug.LogWarning("Duplicate state with name " + name + " in animator controller. Behaviour is undefined.");
-                } else {
-                    table.Add(name, state.state);
+            if ( animLayerName.Contains("/") ) {
+                return animLayerName.Substring(animLayerName.IndexOf("/") + 1);
+            }
+            return "";
+        }
+
+
+        /**
+         * Returns the name embedded in a layer name.
+         * Given a layer name in the form "name/child/submachine/path", return "name", or ""
+         */
+        static string GetLayerName(string animLayerName)
+        {
+            if ( animLayerName.Contains("/") ) {
+                return animLayerName.Substring(0, animLayerName.IndexOf("/"));
+            }
+            return "";
+        }
+
+
+        static AnimatorControllerLayer GetOrCreateAnimatorLayer(AnimatorController controller, string animLayerName, ref string debug)
+        {
+            if ( animLayerName.StartsWith("/") ) { // if layer name starts with "/", then use the default root layer
+                debug += $" - Slash as first character tell us to use root layer'\n";
+                return controller.layers[0];
+            } else {
+                animLayerName = GetLayerName(animLayerName);
+            }
+
+            for ( int i = 0; i<controller.layers.Length; i++ ) {
+                if ( controller.layers[i].name == animLayerName ) {
+                    debug += $" - Found animator layer '{animLayerName}'\n";
+                    return controller.layers[i];
                 }
             }
-            
-            foreach ( var subMachine in machine.stateMachines ) {
-                PopulateStateTable(table, subMachine.stateMachine);
+
+            debug += $" - Creating animator layer '{animLayerName}'\n";
+            controller.AddLayer(animLayerName);
+            for ( int i=0; i < controller.layers.Length; i++ ) {
+                if ( controller.layers[i].name == animLayerName ) {
+                    controller.layers[i].stateMachine.hideFlags = HideFlags.None;   // AddLayer() hides in heircharcy. show it.
+                    return controller.layers[i];
+                }
             }
+
+            Debug.LogWarning($"Couldn't find newly created layer '{animLayerName}");
+            return null;
+        }
+
+
+        /**
+         * Gets or creates the state in the given animation layer. If a subMachinePath exists, then follow/create that path of subMachines before making the state.
+         * subMachinePath should be in the format "/path/to/machine/" or "path/to/machine".
+         */
+        static AnimatorState GetOrCreateAnimatorState(AnimatorController controller, AnimatorControllerLayer acLayer, string subMachinePath, string stateName, ref string debug)
+        {
+            // i don't think this works...
+            // this often results in phantom layers that appear in the controller, but not the list of layers. you cannot delete them via Unity's UI.
+            // the only way i've fixed it is by manually editing the controller file and removing the orphaned layers.
+            if ( ! acLayer.stateMachine ) {
+                debug += $" - WARNING: layer '{acLayer.name}' has no state machine. Controller may be corrupted. Attempting to add...\n";
+                acLayer.stateMachine = new AnimatorStateMachine();
+                acLayer.stateMachine.name = acLayer.name;
+                AssetDatabase.AddObjectToAsset(acLayer.stateMachine, AssetDatabase.GetAssetPath(controller));
+            }
+
+            var curMachine = acLayer.stateMachine;
+
+            debug += $" - Looking for layer '{acLayer.name}' with state machine '{subMachinePath}'\n";
+
+            // follow down the heiarchy of state machines until we reach the final one
+            subMachinePath.Trim('/');
+            if ( subMachinePath != "" ) {
+                string[] subMachineNames = subMachinePath.Split('/');
+                foreach ( string machineName in subMachineNames ) {
+                    bool found = false;
+                    foreach ( var subMachine in curMachine.stateMachines ) {
+                        if ( subMachine.stateMachine.name == machineName ) {
+                            curMachine = subMachine.stateMachine;
+                            found = true;
+                            debug += $"   - found state machine '{machineName}'.\n";
+                            break;
+                        }
+                    }
+
+                    if ( ! found ) {
+                        debug += $"   - could not find state machine '{machineName}'. Creating.\n";
+                        var position = curMachine.stateMachines.Length > 0 ? curMachine.stateMachines[curMachine.stateMachines.Length - 1].position + new Vector3(0, 65) : new Vector3(450, 0, 0);
+                        curMachine = curMachine.AddStateMachine(machineName, position);
+                    }
+                }
+            }
+
+            // find or create the state
+            foreach ( var state in curMachine.states ) {
+                if ( state.state.name == stateName ) {
+                    debug += $"   - state '{stateName}' found.\n";
+                    return state.state;
+                }
+            }
+
+            debug += $"   - state '{stateName}' not found. Creating.\n";
+            return curMachine.AddState(stateName);
         }
 
 
         /**
          * STAGE 8
-         * TODO: evaluate if this is actually useful
          * Move offset data into the local animation data object so it will be saved to file.
+         * 
+         * TODO: evaluate if this is actually useful
          */
         static void SaveOffsetsInAnimData(ImportContext ctx)
         {
-
             foreach ( var tag in ctx.file.frameTags ) {
                 string animName = tag.name;
-                AnimationClip clip = ctx.generatedClips[tag];
 
                 foreach ( KeyValuePair<string, Target> entry in ctx.targets ) {
                     var target = entry.Value;
                     var targetPath = target.path;
-                    var spriteName = target.spriteName;
 
                     for ( int i = tag.from; i <= tag.to; i++ ) {
                         int frameNum = i - tag.from;
@@ -1079,22 +1206,22 @@ namespace MetaSpritePlus {
         public static void GenerateFrameEvents(ImportContext ctx)
         {
             var time = 0.0f;
-            foreach ( var tag in ctx.file.frameTags ) {
-                var clip = ctx.generatedClips[tag];
+
+            foreach ( var clipInfo in ctx.generatedClips ) {
+                var clip = clipInfo.clip;
                 var events = new List<AnimationEvent>(clip.events);
-                string animName = tag.name;
                 var functionName = ctx.settings.eventFunctionName;
 
                 if ( functionName == "" ) {
                     functionName = "OnFrame";
                 }
 
-                for ( int i = tag.from, frameNum = 0; i <= tag.to; i++, frameNum++ ) {
+                for ( int i = clipInfo.tag.from, frameNum = 0; i <= clipInfo.tag.to; i++, frameNum++ ) {
                     var evt = new AnimationEvent
                     {
                         time = time,
                         functionName = functionName,
-                        stringParameter = $"{animName}::{frameNum}",
+                        stringParameter = $"{clipInfo.clipName}::{frameNum}",
                         messageOptions = SendMessageOptions.DontRequireReceiver // tell unity not to complain if functionName doesn't yet exist
                     };
                     time += ctx.file.frames[i].duration * 0.001f;   // aesprite time is in ms, convert to seconds

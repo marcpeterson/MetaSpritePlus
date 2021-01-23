@@ -71,6 +71,7 @@ namespace MetaSpritePlus {
         public int parentIndex;             // -1 if level==0 (has no parent), otherwise the index of direct parent
         public int childLevel;              // nested depth of layer.  currently just used for debugging indentation...
         public int? sortOrder = null;       // sprite sorting order in layer. only targets can have these. allows a target to go in front/behind other sprite parts.
+        public string animatorLayer;        // name of the animator layer and state machine this target should render to. format: "layerName/machine/path"
         public bool visible;
         public BlendMode blendMode;
         public float opacity;

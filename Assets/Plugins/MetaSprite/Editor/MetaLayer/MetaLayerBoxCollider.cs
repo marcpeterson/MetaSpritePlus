@@ -64,10 +64,10 @@ namespace MetaSpritePlus {
                 }
             }
 
-            foreach (var frameTag in ctx.file.frameTags) {
-                var clip = ctx.generatedClips[frameTag];
+            foreach ( var clipInfo in ctx.generatedClips ) {
+                var clip = clipInfo.clip;
 
-                AnimationCurve 
+                AnimationCurve
                     curveOffX = new AnimationCurve(),
                     curveOffY = new AnimationCurve(),
                     curveSizeX = new AnimationCurve(),
@@ -76,7 +76,7 @@ namespace MetaSpritePlus {
 
                 float t = 0;
                 bool hasEnable = false;
-                for (int f = frameTag.from; f <= frameTag.to; ++f) {
+                for (int f = clipInfo.tag.from; f <= clipInfo.tag.to; ++f) {
                     var rect = frameRects[f];
                     var enable = rect.size != Vector2.zero;
                     curveEnable.AddKey(new Keyframe(t, enable ? 1 : 0));
